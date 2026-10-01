@@ -59,6 +59,10 @@ private val LightColorScheme =
         outlineVariant = Color(0xFFF1F5F9),
     )
 
+val StatusSuccess = Color(0xFF10B981)
+val StatusWarning = Color(0xFFF59E0B)
+val StatusError = Color(0xFFEF4444)
+
 @Composable
 fun HabitMinerTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),

@@ -13,6 +13,7 @@ class DeviationDetector
     @Inject
     constructor(
         private val appIdentityResolver: AppIdentityResolver,
+        private val timeProvider: TimeProvider,
     ) {
         data class DeviationResult(
             val timeBin: String,
@@ -34,7 +35,9 @@ class DeviationDetector
             val gson = Gson()
             val type = object : TypeToken<Map<String, Long>>() {}.type
 
-            val currentDay = java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_WEEK)
+            // Get current time once — used for day-type detection, slot progress, and startOfDay below.
+            val nowCal = timeProvider.getCalendar()
+            val currentDay = nowCal.get(java.util.Calendar.DAY_OF_WEEK)
             val todayDayType =
                 if (currentDay == java.util.Calendar.SATURDAY || currentDay == java.util.Calendar.SUNDAY) {
                     "WEEKEND"
@@ -42,9 +45,8 @@ class DeviationDetector
                     "WEEKDAY"
                 }
             val groupedToday = validTodayUsage.groupBy { "${it.dayType}_${it.timeSlot}" }
-            val cal = java.util.Calendar.getInstance()
-            val hour = cal.get(java.util.Calendar.HOUR_OF_DAY)
-            val minute = cal.get(java.util.Calendar.MINUTE)
+            val hour = nowCal.get(java.util.Calendar.HOUR_OF_DAY)
+            val minute = nowCal.get(java.util.Calendar.MINUTE)
             val minuteOfDay = hour * 60 + minute
 
             val slotProgress =
@@ -150,9 +152,10 @@ class DeviationDetector
                     )
                 }
 
-                // Calculate actual time slot boundaries to prevent false positives when usages is empty
+                // Calculate the start of the current day using the already-retrieved nowCal
+                // (cloned so we don't mutate the fields-of-day-of-week check above).
                 val startOfDay =
-                    java.util.Calendar.getInstance().apply {
+                    (nowCal.clone() as java.util.Calendar).apply {
                         set(java.util.Calendar.HOUR_OF_DAY, 0)
                         set(java.util.Calendar.MINUTE, 0)
                         set(java.util.Calendar.SECOND, 0)
@@ -179,10 +182,11 @@ class DeviationDetector
 
                 if (relevantContexts.isNotEmpty()) {
                     val currentAvgLight = relevantContexts.map { it.lightLux.toDouble() }.average().toFloat()
-                    val activeCount = relevantContexts.count { it.accelEnergy > ACTIVE_ENERGY_THRESHOLD }
+                    val dynamicEnergyThreshold = (base.avgAccelEnergy * 0.5f).coerceAtLeast(2f).coerceAtMost(10f)
+                    val activeCount = relevantContexts.count { it.accelEnergy > dynamicEnergyThreshold }
                     val currentActiveRatio = activeCount.toFloat() / relevantContexts.size
 
-                    val baselineActive = base.avgAccelEnergy > ACTIVE_ENERGY_THRESHOLD
+                    val baselineActive = base.avgAccelEnergy > dynamicEnergyThreshold
                     val currentActive = currentActiveRatio > ACTIVE_RATIO_THRESHOLD
 
                     if (baselineActive && !currentActive && base.avgAccelEnergy > 10f) {
@@ -214,10 +218,13 @@ class DeviationDetector
                     }
 
                     // Light shift detection (dark vs bright)
-                    val baselineDark = base.avgLightLux < DARKNESS_THRESHOLD_LUX
-                    val currentDark = currentAvgLight < DARKNESS_THRESHOLD_LUX
-                    val baselineBright = base.avgLightLux > BRIGHTNESS_THRESHOLD_LUX
-                    val currentBright = currentAvgLight > BRIGHTNESS_THRESHOLD_LUX
+                    val dynamicDarknessLux = (base.avgLightLux * 0.5f).coerceAtLeast(30f)
+                    val dynamicBrightnessLux = (base.avgLightLux * 1.5f).coerceAtLeast(200f).coerceAtMost(1000f)
+
+                    val baselineDark = base.avgLightLux < dynamicDarknessLux
+                    val currentDark = currentAvgLight < dynamicDarknessLux
+                    val baselineBright = base.avgLightLux > dynamicBrightnessLux
+                    val currentBright = currentAvgLight > dynamicBrightnessLux
 
                     if (baselineDark && currentBright) {
                         results.add(

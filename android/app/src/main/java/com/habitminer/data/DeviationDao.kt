@@ -28,4 +28,10 @@ interface DeviationDao {
 
     @Query("DELETE FROM deviations")
     suspend fun deleteAll()
+
+    @Query("DELETE FROM deviations WHERE id = :id")
+    suspend fun deleteById(id: Long)
+
+    @Query("SELECT * FROM deviations ORDER BY timestamp ASC")
+    fun getAllDeviations(): Flow<List<DeviationEntity>>
 }

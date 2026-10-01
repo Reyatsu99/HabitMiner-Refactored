@@ -1,6 +1,7 @@
 package com.habitminer.data
 
 import android.content.Context
+import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.firstOrNull
 import java.io.File
@@ -16,24 +17,25 @@ class ExportManager
     @Inject
     constructor(
         @ApplicationContext private val context: Context,
-        private val appUsageDao: AppUsageDao,
-        private val contextDao: ContextDao,
-        private val habitDao: HabitDao,
-        private val baselineDao: BaselineDao,
-        private val deviationDao: DeviationDao,
+        private val contextRepository: com.habitminer.repository.ContextRepository,
+        private val habitRepository: com.habitminer.repository.HabitRepository,
     ) {
         suspend fun exportDataToCsv(): String? {
             try {
-                val exportDir = File(context.getExternalFilesDir(null), "export")
+                val externalDir = context.getExternalFilesDir(null) ?: context.filesDir
+                val exportDir = File(externalDir, "export")
                 if (!exportDir.exists()) {
                     exportDir.mkdirs()
                 }
+
+                // Delete any stale ZIPs from previous exports
+                exportDir.listFiles { f -> f.name.endsWith(".zip") }?.forEach { it.delete() }
 
                 val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
 
                 // 1. Export App Usage
                 val usageFile = File(exportDir, "app_usage_$timestamp.csv")
-                val usages = appUsageDao.getAllUsage().firstOrNull() ?: emptyList()
+                val usages = contextRepository.getAllUsage().firstOrNull() ?: emptyList()
                 FileWriter(usageFile).use { writer ->
                     writer.append("id,packageName,appName,appCategory,startTime,endTime,")
                     writer.append("durationMs,timeSlot,dayType,previousPackageName,isHistorical\n")
@@ -48,7 +50,7 @@ class ExportManager
 
                 // 2. Export Context Snapshots
                 val contextFile = File(exportDir, "context_snapshots_$timestamp.csv")
-                val contexts = contextDao.getAllSnapshots().firstOrNull() ?: emptyList()
+                val contexts = contextRepository.getAllSnapshots().firstOrNull() ?: emptyList()
                 FileWriter(contextFile).use { writer ->
                     writer.append("id,timestamp,accelMean,accelVariance,accelStd,accelMin,accelMax,accelEnergy,")
                     writer.append("gyroMean,gyroVariance,gyroStd,gyroMin,gyroMax,gyroEnergy,lightLux,proximityNear,")
@@ -64,7 +66,7 @@ class ExportManager
 
                 // 3. Export Habits
                 val habitsFile = File(exportDir, "habits_$timestamp.csv")
-                val habits = habitDao.getAllHabits().firstOrNull() ?: emptyList()
+                val habits = habitRepository.getAllHabits().firstOrNull() ?: emptyList()
                 FileWriter(habitsFile).use { writer ->
                     writer.append("id,habitName,patternDescription,appSequence,confidence,")
                     writer.append("occurrenceCount,timeSlot,dayType,discoveredAt,lastSeenAt\n")
@@ -77,7 +79,7 @@ class ExportManager
 
                 // 4. Export Baselines
                 val baselinesFile = File(exportDir, "baselines_$timestamp.csv")
-                val baselines = baselineDao.getAllBaselines().firstOrNull() ?: emptyList()
+                val baselines = habitRepository.getAllBaselines().firstOrNull() ?: emptyList()
                 FileWriter(baselinesFile).use { writer ->
                     writer.append("timeBin,avgScreenTimeMs,stdScreenTimeMs,avgSessionCount,stdSessionCount,")
                     writer.append("avgUnlockCount,typicalCategoriesJson,avgAccelEnergy,avgLightLux,updatedAt,dataPointCount\n")
@@ -97,7 +99,7 @@ class ExportManager
 
                 // 5. Export Deviations
                 val deviationsFile = File(exportDir, "deviations_$timestamp.csv")
-                val deviations = deviationDao.getRecentDeviations(Int.MAX_VALUE).firstOrNull() ?: emptyList()
+                val deviations = habitRepository.getAllDeviations().firstOrNull() ?: emptyList()
                 FileWriter(deviationsFile).use { writer ->
                     writer.append("id,timestamp,timeBin,deviationType,description,zScore,normalizedScore,affectedCategory\n")
                     deviations.forEach {
@@ -106,11 +108,28 @@ class ExportManager
                     }
                 }
 
-                return exportDir.absolutePath
+                // 6. Zip everything
+                val zipFile = File(exportDir, "habitminer_export_$timestamp.zip")
+                java.util.zip.ZipOutputStream(java.io.FileOutputStream(zipFile)).use { zos ->
+                    listOf(usageFile, contextFile, habitsFile, baselinesFile, deviationsFile).forEach { file ->
+                        if (file.exists()) {
+                            zos.putNextEntry(java.util.zip.ZipEntry(file.name))
+                            file.inputStream().use { it.copyTo(zos) }
+                            zos.closeEntry()
+                            file.delete() // clean up raw CSVs
+                        }
+                    }
+                }
+
+                return zipFile.absolutePath
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e(TAG, "exportDataToCsv failed", e)
                 return null
             }
+        }
+
+        companion object {
+            private const val TAG = "ExportManager"
         }
 
         private fun escapeCsv(value: String): String {

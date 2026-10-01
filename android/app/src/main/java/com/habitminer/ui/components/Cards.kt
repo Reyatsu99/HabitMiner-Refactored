@@ -23,7 +23,22 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.habitminer.data.DeviationEntity
 import com.habitminer.data.DiscoveredHabitEntity
+import com.habitminer.ui.theme.StatusWarning
+import com.habitminer.ui.theme.StatusError
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.ElevatedCard
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.Icon
+import androidx.compose.material3.TextButton
+import java.text.SimpleDateFormat
+import java.util.Locale
+import java.util.Date
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun HabitCard(
     habit: DiscoveredHabitEntity,
@@ -49,30 +64,46 @@ fun HabitCard(
                 color = MaterialTheme.colorScheme.primary,
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 LinearProgressIndicator(
                     progress = { habit.confidence },
-                    modifier = Modifier.weight(1f).height(8.dp),
+                    modifier = Modifier.weight(1f).height(6.dp),
                     color = MaterialTheme.colorScheme.secondary,
                     trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f),
                 )
                 Spacer(modifier = Modifier.width(12.dp))
                 Text(
-                    text = "${habit.occurrenceCount} observations · ${(habit.confidence * 100).toInt()}% match",
+                    text = "${(habit.confidence * 100).toInt()}% match",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                 )
             }
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = "${habit.timeSlot} · ${habit.dayType}",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-            )
+            Spacer(modifier = Modifier.height(12.dp))
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)
+            ) {
+                AssistChip(
+                    onClick = { },
+                    label = { Text("${habit.occurrenceCount} occurrences") },
+                    colors = AssistChipDefaults.assistChipColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                )
+                val dateStr = SimpleDateFormat("MMM dd", Locale.getDefault()).format(Date(habit.lastSeenAt))
+                AssistChip(
+                    onClick = { },
+                    label = { Text("Last seen $dateStr") },
+                    colors = AssistChipDefaults.assistChipColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                )
+                AssistChip(
+                    onClick = { },
+                    label = { Text("${habit.timeSlot} · ${habit.dayType}") },
+                    colors = AssistChipDefaults.assistChipColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                )
+            }
         }
     }
 }
@@ -81,12 +112,13 @@ fun HabitCard(
 fun DeviationCard(
     dev: DeviationEntity,
     modifier: Modifier = Modifier,
+    onAcknowledge: (() -> Unit)? = null,
 ) {
     val isHighImpact = dev.normalizedScore > 0.7f
-    val impactColor = if (isHighImpact) MaterialTheme.colorScheme.error else Color(0xFFF59E0B)
+    val impactColor = if (isHighImpact) StatusError else StatusWarning
 
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    ElevatedCard(
+        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface),
         shape = RoundedCornerShape(16.dp),
         modifier = modifier.fillMaxWidth(),
     ) {
@@ -94,30 +126,49 @@ fun DeviationCard(
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = dev.deviationType.replace('_', ' '),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Warning, contentDescription = null, tint = impactColor, modifier = Modifier.padding(end = 8.dp))
+                    Text(
+                        text = dev.deviationType.replace('_', ' '),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
                 Text(
                     text = "${(dev.normalizedScore * 100).toInt()}% Impact",
                     style = MaterialTheme.typography.labelMedium,
                     color = impactColor,
+                    fontWeight = FontWeight.Bold
                 )
             }
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text = dev.description,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface,
             )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = dev.timeBin.replace('_', ' '),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-            )
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = dev.timeBin.replace('_', ' '),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                
+                if (onAcknowledge != null) {
+                    TextButton(onClick = onAcknowledge) {
+                        Text("Acknowledge")
+                    }
+                }
+            }
         }
     }
 }

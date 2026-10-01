@@ -31,14 +31,18 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -79,6 +83,9 @@ data class HabitUiState(
     val contextRecordCount: Int = 0,
     val lastUsageUpdate: Long? = null,
     val isMonitoringServiceActive: Boolean = false,
+    val selectedHistoryDate: Long = 0L,
+    val historicalAppUsage: ImmutableList<AppUsageEntity> = persistentListOf(),
+    val historicalSnapshots: ImmutableList<ContextSnapshotEntity> = persistentListOf(),
 )
 
 @OptIn(FlowPreview::class)
@@ -96,9 +103,14 @@ class HabitViewModel
         private val usageDataCollector: UsageDataCollector,
         private val appIdentityResolver: AppIdentityResolver,
         private val exportManager: com.habitminer.data.ExportManager,
+        private val habitServiceManager: com.habitminer.collection.HabitServiceManager,
     ) : AndroidViewModel(application) {
-        private val _uiState = MutableStateFlow(HabitUiState())
+        private val _uiState = MutableStateFlow(HabitUiState(selectedHistoryDate = getStartOfDay()))
         val uiState: StateFlow<HabitUiState> = _uiState.asStateFlow()
+        // One-shot event: emits the file path for the Share Sheet. replay=0 means no re-play
+        // after rotation, so the Share Sheet fires exactly once per export.
+        private val _shareExportEvent = MutableSharedFlow<String>(replay = 0, extraBufferCapacity = 1)
+        val shareExportEvent: SharedFlow<String> = _shareExportEvent.asSharedFlow()
         private var initialCollectionStarted = false
         private val syncMutex = Mutex()
 
@@ -177,7 +189,7 @@ class HabitViewModel
                     val lastTimestamp = contextRepository.getLastInsertedUsageTimestamp()
                     val usages =
                         when {
-                            count == 0 -> usageDataCollector.collectLast14Days()
+                            count == 0 -> usageDataCollector.collectHistoricalData()
                             else -> {
                                 val launcherPackages = appIdentityResolver.getLauncherPackages()
                                 val prevPkg = contextRepository.getLastUsedNonLauncherPackage(launcherPackages)
@@ -188,24 +200,8 @@ class HabitViewModel
                             }
                         }
                     if (usages.isNotEmpty()) contextRepository.insertAllAppUsage(usages)
-                    DataCollectionWorker.schedulePeriodicWork(application)
-
-                    // Start the Foreground Service for continuous sensor context collection.
-                    // Wrapped in try-catch: on API 31+ calling startForegroundService() from a
-                    // background coroutine throws ForegroundServiceStartNotAllowedException (CRITICAL-2)
-                    val serviceIntent =
-                        Intent(application, com.habitminer.collection.MonitoringService::class.java).apply {
-                            action = com.habitminer.collection.MonitoringService.ACTION_START
-                        }
-                    try {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                            application.startForegroundService(serviceIntent)
-                        } else {
-                            application.startService(serviceIntent)
-                        }
-                    } catch (e: Exception) {
-                        android.util.Log.w("HabitMiner", "Could not start MonitoringService: ${e.message}")
-                    }
+                    
+                    habitServiceManager.startServices()
 
                     val preferences = application.getSharedPreferences(PrefsKeys.PREFS_NAME, Context.MODE_PRIVATE)
                     var labelsChanged = false
@@ -292,10 +288,29 @@ class HabitViewModel
                 _uiState.update { it.copy(exportMessage = "Exporting data...") }
                 val path = exportManager.exportDataToCsv()
                 if (path != null) {
-                    _uiState.update { it.copy(exportMessage = "Exported to $path") }
+                    _uiState.update { it.copy(exportMessage = "Export complete. Choose an app to share.") }
+                    _shareExportEvent.emit(path)
                 } else {
                     _uiState.update { it.copy(exportMessage = "Export failed. Please try again.") }
                 }
+            }
+        }
+
+        fun selectHistoryDate(timeInMillis: Long) {
+            val startOfDay = Calendar.getInstance().apply {
+                this.timeInMillis = timeInMillis
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }.timeInMillis
+            _uiState.update { it.copy(selectedHistoryDate = startOfDay) }
+        }
+
+        fun acknowledgeDeviation(deviationId: Long) {
+            viewModelScope.launch {
+                // We'll just delete it for now to acknowledge it
+                habitRepository.deleteDeviation(deviationId)
             }
         }
 
@@ -303,7 +318,7 @@ class HabitViewModel
             _uiState.update { it.copy(exportMessage = null) }
         }
 
-        private suspend fun refreshHabits() {
+        private suspend fun refreshHabits() = withContext(Dispatchers.Default) {
             val startOfDay = getStartOfDay()
             val allUsage = contextRepository.getAllUsage().first()
             val todayUsage = contextRepository.getTodayUsage(startOfDay).first()
@@ -398,22 +413,24 @@ class HabitViewModel
                                     }
 
                                     // Evaluate today's deviations dynamically
-                                    val currentBaselines = habitRepository.getAllBaselines().first()
-                                    val todayContexts = contextRepository.getTodaySnapshots(startOfDay).first()
-                                    val deviationsResult = deviationDetector.detectDeviations(usage, todayContexts, currentBaselines)
-                                    habitRepository.deleteDeviationsSince(startOfDay)
-                                    deviationsResult.forEach { dev ->
-                                        habitRepository.insertDeviation(
-                                            com.habitminer.data.DeviationEntity(
-                                                timestamp = System.currentTimeMillis(),
-                                                timeBin = dev.timeBin,
-                                                deviationType = dev.deviationType,
-                                                description = dev.description,
-                                                zScore = dev.zScore,
-                                                normalizedScore = dev.normalizedScore,
-                                                affectedCategory = dev.affectedCategory,
-                                            ),
-                                        )
+                                    withContext(Dispatchers.Default) {
+                                        val currentBaselines = habitRepository.getAllBaselines().first()
+                                        val todayContexts = contextRepository.getTodaySnapshots(startOfDay).first()
+                                        val deviationsResult = deviationDetector.detectDeviations(usage, todayContexts, currentBaselines)
+                                        habitRepository.deleteDeviationsSince(startOfDay)
+                                        deviationsResult.forEach { dev ->
+                                            habitRepository.insertDeviation(
+                                                com.habitminer.data.DeviationEntity(
+                                                    timestamp = System.currentTimeMillis(),
+                                                    timeBin = dev.timeBin,
+                                                    deviationType = dev.deviationType,
+                                                    description = dev.description,
+                                                    zScore = dev.zScore,
+                                                    normalizedScore = dev.normalizedScore,
+                                                    affectedCategory = dev.affectedCategory,
+                                                ),
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -470,6 +487,27 @@ class HabitViewModel
                         }
                     }
 
+                    // Historical Data observation
+                    launch {
+                        _uiState.map { it.selectedHistoryDate }
+                            .distinctUntilChanged()
+                            .collectLatest { date ->
+                                val endOfDay = date + 24 * 60 * 60 * 1000L - 1L
+                                val usage = contextRepository.getUsageForDateRange(date, endOfDay)
+                                _uiState.update { it.copy(historicalAppUsage = usage.toImmutableList()) }
+                            }
+                    }
+
+                    launch {
+                        _uiState.map { it.selectedHistoryDate }
+                            .distinctUntilChanged()
+                            .collectLatest { date ->
+                                val endOfDay = date + 24 * 60 * 60 * 1000L - 1L
+                                val snaps = contextRepository.getSnapshotsForDateRange(date, endOfDay)
+                                _uiState.update { it.copy(historicalSnapshots = snaps.toImmutableList()) }
+                            }
+                    }
+
                     launch {
                         contextRepository.getAllUsage().debounce(300).collect { usage ->
                             // Update the shared cache so today-usage collector can use it without re-querying (CRITICAL-5)
@@ -505,11 +543,10 @@ class HabitViewModel
                     }
 
                     launch {
-                        while (true) {
+                        com.habitminer.collection.MonitoringService.isServiceRunning.collectLatest { isRunning ->
                             _uiState.update {
-                                it.copy(isMonitoringServiceActive = com.habitminer.collection.MonitoringService.isServiceRunning)
+                                it.copy(isMonitoringServiceActive = isRunning)
                             }
-                            delay(5000)
                         }
                     }
                 }
@@ -530,8 +567,7 @@ class HabitViewModel
                 val app = getApplication<Application>()
 
                 // Cancel all background work
-                androidx.work.WorkManager.getInstance(app).cancelAllWork()
-                app.stopService(Intent(app, com.habitminer.collection.MonitoringService::class.java))
+                habitServiceManager.stopServices()
 
                 // Clear all Room tables
                 contextRepository.clearCollectedData()

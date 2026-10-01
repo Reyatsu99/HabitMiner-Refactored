@@ -36,19 +36,45 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.habitminer.engine.HabitUiState
 import com.habitminer.engine.HabitViewModel
 import kotlinx.coroutines.delay
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 
+@kotlin.OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     state: HabitUiState,
     viewModel: HabitViewModel,
 ) {
+    val context = LocalContext.current
     var confirmClearData by remember { mutableStateOf(false) }
     val scrollState = rememberScrollState()
+
+    // Collect the one-shot share event from the ViewModel. This uses a SharedFlow
+    // with replay=0, so it fires exactly once and is NOT replayed after rotation.
+    LaunchedEffect(viewModel) {
+        viewModel.shareExportEvent.collect { path ->
+            val file = java.io.File(path)
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                file
+            )
+            val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                type = "application/zip"
+                putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            context.startActivity(android.content.Intent.createChooser(shareIntent, "Share Exported Data"))
+        }
+    }
 
     Column(
         modifier =
@@ -81,29 +107,17 @@ fun SettingsScreen(
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface,
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
-                listOf(30, 90, 180).forEach { days ->
-                    val isSelected = days == state.retentionDays
-                    Button(
+            SingleChoiceSegmentedButtonRow(
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+            ) {
+                val options = listOf(30, 90, 180)
+                options.forEachIndexed { index, days ->
+                    SegmentedButton(
+                        selected = days == state.retentionDays,
                         onClick = { viewModel.setRetentionDays(days) },
-                        colors =
-                            ButtonDefaults.buttonColors(
-                                containerColor =
-                                    if (isSelected) {
-                                        MaterialTheme.colorScheme.primaryContainer
-                                    } else {
-                                        MaterialTheme.colorScheme.surfaceVariant
-                                    },
-                                contentColor =
-                                    if (isSelected) {
-                                        MaterialTheme.colorScheme.onPrimaryContainer
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    },
-                            ),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size)
                     ) {
-                        Text(if (isSelected) "✓ ${days}d" else "${days}d")
+                        Text("${days}d")
                     }
                 }
             }
@@ -123,8 +137,8 @@ fun SettingsScreen(
         SettingsSection(title = "Data Portability") {
             SettingsItem(
                 icon = Icons.Default.Download,
-                title = "Export to CSV",
-                description = "Export your raw context and usage data for external analysis.",
+                title = "Export Data (ZIP)",
+                description = "Packages all your usage, context, habits, and deviation data into a single .zip file for sharing and external analysis.",
             )
             Spacer(modifier = Modifier.height(16.dp))
             Button(

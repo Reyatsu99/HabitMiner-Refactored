@@ -11,9 +11,6 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import com.habitminer.data.AppUsageDao
-import com.habitminer.data.ContextDao
-import com.habitminer.data.DeviceEventDao
 import com.habitminer.data.PrefsKeys
 import com.habitminer.domain.AppIdentityResolver
 import com.habitminer.repository.ContextRepository
@@ -31,13 +28,11 @@ class DataCollectionWorker
     constructor(
         @Assisted private val appContext: Context,
         @Assisted workerParams: WorkerParameters,
-        private val usageDao: AppUsageDao,
-        private val contextDao: ContextDao,
-        private val eventDao: DeviceEventDao,
         private val usageCollector: UsageDataCollector,
         private val sensorCollector: SensorContextCollector,
         private val appIdentityResolver: AppIdentityResolver,
         private val contextRepository: ContextRepository,
+        private val habitRepository: com.habitminer.repository.HabitRepository,
     ) : CoroutineWorker(appContext, workerParams) {
         override suspend fun doWork(): Result =
             workerMutex.withLock {
@@ -49,18 +44,17 @@ class DataCollectionWorker
 
                     val retentionDays = preferences.getInt(PrefsKeys.RETENTION_DAYS, 90).coerceIn(30, 180)
                     val retentionCutoff = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(retentionDays.toLong())
-                    usageDao.deleteOlderThan(retentionCutoff)
-                    contextDao.deleteOlderThan(retentionCutoff)
-                    eventDao.deleteOlderThan(retentionCutoff)
+                    contextRepository.clearOldData(retentionCutoff)
+                    habitRepository.clearOldData(retentionCutoff)
 
                     val lastTimestamp =
-                        usageDao.getLastInsertedTimestamp()
+                        contextRepository.getLastInsertedUsageTimestamp()
                             ?: (System.currentTimeMillis() - TimeUnit.DAYS.toMillis(14))
 
-                    val prevPkg = usageDao.getLastUsedNonLauncherPackage(appIdentityResolver.getLauncherPackages())
+                    val prevPkg = contextRepository.getLastUsedNonLauncherPackage(appIdentityResolver.getLauncherPackages())
                     val newUsage = usageCollector.collectUsageSince(lastTimestamp, prevPkg)
                     if (newUsage.isNotEmpty()) {
-                        usageDao.insertAll(newUsage)
+                        contextRepository.insertAllAppUsage(newUsage)
                     }
 
                     val pm = appContext.getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -75,10 +69,10 @@ class DataCollectionWorker
                             set(Calendar.MILLISECOND, 0)
                             timeInMillis
                         }
-                    val unlockCount = eventDao.countSince(DeviceEventReceiver.EVENT_UNLOCK, startOfDay)
+                    val unlockCount = contextRepository.countDeviceEventsSince(com.habitminer.collection.DeviceEventReceiver.EVENT_UNLOCK, startOfDay)
                     val notificationsLastHour =
-                        if (HabitNotificationListener.isEnabled(appContext)) {
-                            eventDao.countSince(DeviceEventReceiver.EVENT_NOTIFICATION, now - TimeUnit.HOURS.toMillis(1))
+                        if (com.habitminer.collection.HabitNotificationListener.isEnabled(appContext)) {
+                            contextRepository.countDeviceEventsSince(com.habitminer.collection.DeviceEventReceiver.EVENT_NOTIFICATION, now - TimeUnit.HOURS.toMillis(1))
                         } else {
                             -1
                         }
@@ -120,7 +114,7 @@ class DataCollectionWorker
                                     isCharging = isCharging,
                                 )
 
-                            contextDao.insert(snapshot)
+                            contextRepository.insertSnapshot(snapshot)
                         }
                     }
 

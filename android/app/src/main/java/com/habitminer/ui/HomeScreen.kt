@@ -38,7 +38,15 @@ import com.habitminer.data.ContextSnapshotEntity
 import com.habitminer.engine.HabitUiState
 import com.habitminer.engine.HabitViewModel
 import com.habitminer.ui.components.HabitCard
+import com.habitminer.ui.components.DeviationCard
 import com.habitminer.ui.components.TopAppMiniChart
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import com.habitminer.ui.theme.StatusSuccess
+import com.habitminer.ui.theme.StatusWarning
+import com.habitminer.ui.theme.StatusError
 
 @Composable
 fun HomeScreen(
@@ -55,6 +63,26 @@ fun HomeScreen(
                 .padding(horizontal = 20.dp, vertical = 24.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp),
     ) {
+        val context = androidx.compose.ui.platform.LocalContext.current
+        
+        if (!state.hasUsagePermission || !state.hasRuntimePermissions || !state.hasNotificationPermission) {
+            PermissionScreen(
+                hasUsage = state.hasUsagePermission,
+                hasRuntime = state.hasRuntimePermissions,
+                hasNotification = state.hasNotificationPermission,
+                onRequestUsage = {
+                    context.startActivity(android.content.Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                },
+                onRuntimePermissionsGranted = {
+                    viewModel.checkPermissions()
+                },
+                onRequestNotification = {
+                    context.startActivity(android.content.Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                },
+            )
+            return@Column
+        }
+
         // First Run Experience
         if (state.daysOfData == 0 && state.todayScreenTimeMs == 0L && state.discoveredHabits.isEmpty()) {
             FirstRunExperience(state, viewModel)
@@ -91,11 +119,9 @@ fun HomeScreen(
                 if (hasDeviations) {
                     val dev = state.todayDeviations.maxByOrNull { it.normalizedScore }
                     if (dev != null) {
-                        ActionableInsightCard(
-                            title = "Deviation Detected",
-                            description = dev.description,
-                            icon = Icons.Default.Warning,
-                            isCritical = dev.normalizedScore > 0.7f,
+                        DeviationCard(
+                            dev = dev,
+                            onAcknowledge = { viewModel.acknowledgeDeviation(dev.id) }
                         )
                     }
                 }
@@ -261,48 +287,77 @@ fun TodayUsageCard(state: HabitUiState) {
             val hours = screenTimeMs / (1000 * 60 * 60)
             val mins = (screenTimeMs / (1000 * 60)) % 60
 
-            Text(
-                text = "Screen time",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-            )
-            Text(
-                text = "${hours}h ${mins}m",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Column {
+                    Text(
+                        text = "Screen time",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                    )
+                    Text(
+                        text = "${hours}h ${mins}m",
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+                
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = "Unlocks",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                    )
+                    Text(
+                        text = "${state.todayUnlocks}",
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+            }
 
             if (targetMs > 0) {
                 val tHours = targetMs / (1000 * 60 * 60)
                 val tMins = (targetMs / (1000 * 60)) % 60
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
-                Text(
-                    text = "Typical for this period",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                )
-                Text(
-                    text = "${tHours}h ${tMins}m",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Column {
+                        Text(
+                            text = "Typical",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                        )
+                        Text(
+                            text = "${tHours}h ${tMins}m",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                    
+                    Column(horizontalAlignment = Alignment.End) {
+                        val diffMs = screenTimeMs - targetMs
+                        val diffSign = if (diffMs > 0) "+" else "−"
+                        val diffMins = Math.abs(diffMs) / (1000 * 60)
+                        val diffColor = if (diffMs > 0) StatusError else StatusSuccess
 
-                val diffMs = screenTimeMs - targetMs
-                val diffSign = if (diffMs > 0) "+" else "−"
-                val diffMins = Math.abs(diffMs) / (1000 * 60)
-                val diffColor = if (diffMs > 0) MaterialTheme.colorScheme.error else Color(0xFF10B981)
-
-                Text(
-                    text = "$diffSign$diffMins min from typical",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = diffColor,
-                    fontWeight = FontWeight.SemiBold,
-                )
+                        Text(
+                            text = "Difference",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                        )
+                        Text(
+                            text = "$diffSign$diffMins min",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = diffColor,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                }
             } else {
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(16.dp))
                 Text(
                     text = "Typical for this period",
                     style = MaterialTheme.typography.labelMedium,
@@ -324,6 +379,7 @@ fun TodayUsageCard(state: HabitUiState) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun CompactContextBanner(
     context: ContextSnapshotEntity,
@@ -349,7 +405,7 @@ fun CompactContextBanner(
         } else {
             "🌑 Dark"
         }
-    val batteryText = if (context.batteryLevel < 0) "Unavailable" else "${context.batteryLevel}%"
+    val batteryText = if (context.batteryLevel < 0) "Unavailable" else "🔋 ${context.batteryLevel}%"
     val steps = if (context.stepsSinceLastSnapshot > 0) "👣 ${context.stepsSinceLastSnapshot} steps" else "👣 --"
     val proximity =
         if (context.proximityNear == true) {
@@ -360,24 +416,30 @@ fun CompactContextBanner(
             "📱 --"
         }
 
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        shape = RoundedCornerShape(16.dp),
+    FlowRow(
         modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(motion, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
-                Text(light, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(steps, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
-                Text("🔋 $batteryText", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(proximity, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
-        }
+        AssistChip(
+            onClick = {},
+            label = { Text(motion) }
+        )
+        AssistChip(
+            onClick = {},
+            label = { Text(light) }
+        )
+        AssistChip(
+            onClick = {},
+            label = { Text(batteryText) }
+        )
+        AssistChip(
+            onClick = {},
+            label = { Text(steps) }
+        )
+        AssistChip(
+            onClick = {},
+            label = { Text(proximity) }
+        )
     }
 }
 

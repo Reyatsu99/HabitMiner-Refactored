@@ -165,35 +165,35 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier.padding(innerPadding),
                         color = MaterialTheme.colorScheme.background,
                     ) {
-                        if (!state.hasUsagePermission || !state.hasRuntimePermissions || !state.hasNotificationPermission) {
-                            PermissionScreen(
-                                hasUsage = state.hasUsagePermission,
-                                hasRuntime = state.hasRuntimePermissions,
-                                hasNotification = state.hasNotificationPermission,
-                                onRequestUsage = {
-                                    startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
-                                },
-                                onRuntimePermissionsGranted = {
-                                    viewModel.checkPermissions()
-                                },
-                                onRequestNotification = {
-                                    startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-                                },
-                            )
-                        } else {
-                            NavHost(navController = navController, startDestination = Screen.Home.route) {
-                                composable(Screen.Home.route) { HomeScreen(state, viewModel) }
-                                composable(Screen.History.route) { HistoryScreen(state) }
-                                composable(Screen.Insights.route) { InsightsScreen(state) }
-                                composable(Screen.Settings.route) {
-                                    SettingsScreen(
-                                        state = state,
-                                        viewModel = viewModel,
+                        NavHost(
+                            navController = navController,
+                            startDestination = Screen.Home.route,
+                            enterTransition = {
+                                androidx.compose.animation.fadeIn(animationSpec = androidx.compose.animation.core.tween(300)) +
+                                    androidx.compose.animation.slideInHorizontally(
+                                        animationSpec = androidx.compose.animation.core.tween(300),
+                                        initialOffsetX = { 50 }
                                     )
-                                }
-                                composable(Screen.Health.route) {
-                                    HealthScreen(state = state)
-                                }
+                            },
+                            exitTransition = {
+                                androidx.compose.animation.fadeOut(animationSpec = androidx.compose.animation.core.tween(300)) +
+                                    androidx.compose.animation.slideOutHorizontally(
+                                        animationSpec = androidx.compose.animation.core.tween(300),
+                                        targetOffsetX = { -50 }
+                                    )
+                            }
+                        ) {
+                            composable(Screen.Home.route) { HomeScreen(state, viewModel) }
+                            composable(Screen.History.route) { HistoryScreen(state, viewModel) }
+                            composable(Screen.Insights.route) { InsightsScreen(state) }
+                            composable(Screen.Settings.route) {
+                                SettingsScreen(
+                                    state = state,
+                                    viewModel = viewModel,
+                                )
+                            }
+                            composable(Screen.Health.route) {
+                                HealthScreen(state = state)
                             }
                         }
                     }

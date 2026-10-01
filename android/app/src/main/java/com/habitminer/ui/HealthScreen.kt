@@ -44,6 +44,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.habitminer.engine.HabitUiState
+import com.habitminer.ui.theme.StatusSuccess
+import com.habitminer.ui.theme.StatusError
+import androidx.compose.material3.LinearProgressIndicator
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -197,7 +200,7 @@ fun HealthScreen(state: HabitUiState) {
                                 if (state.hasUsagePermission) "Active" else "Inactive",
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.Bold,
-                                color = if (state.hasUsagePermission) Color(0xFF10B981) else MaterialTheme.colorScheme.error,
+                                color = if (state.hasUsagePermission) StatusSuccess else MaterialTheme.colorScheme.error,
                             )
                         }
                         Spacer(modifier = Modifier.height(8.dp))
@@ -207,7 +210,7 @@ fun HealthScreen(state: HabitUiState) {
                                 if (state.isMonitoringServiceActive) "Active" else "Stopped/Dead",
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.Bold,
-                                color = if (state.isMonitoringServiceActive) Color(0xFF10B981) else MaterialTheme.colorScheme.error,
+                                color = if (state.isMonitoringServiceActive) StatusSuccess else MaterialTheme.colorScheme.error,
                             )
                         }
                         Spacer(modifier = Modifier.height(8.dp))
@@ -236,7 +239,7 @@ fun HealthScreen(state: HabitUiState) {
                                 if (isRestricted) "Restricted (Action Needed)" else "Unrestricted",
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.Bold,
-                                color = if (isRestricted) MaterialTheme.colorScheme.error else Color(0xFF10B981),
+                                color = if (isRestricted) MaterialTheme.colorScheme.error else StatusSuccess,
                             )
                         }
                     }
@@ -310,6 +313,15 @@ fun HealthScreen(state: HabitUiState) {
                             Text("Baseline", style = MaterialTheme.typography.bodyMedium)
                             Text(state.baselineStatus, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
                         }
+                        if (state.daysOfData < 5) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            LinearProgressIndicator(
+                                progress = { (state.daysOfData / 5f).coerceIn(0f, 1f) },
+                                modifier = Modifier.fillMaxWidth(),
+                                color = MaterialTheme.colorScheme.primary,
+                                trackColor = MaterialTheme.colorScheme.primaryContainer,
+                            )
+                        }
                         Spacer(modifier = Modifier.height(8.dp))
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("Discovered Patterns", style = MaterialTheme.typography.bodyMedium)
@@ -353,6 +365,14 @@ fun HealthScreen(state: HabitUiState) {
                                 "Local Database",
                                 style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            val dbFile = context.getDatabasePath("habitminer_db")
+                            val dbSizeKb = if (dbFile.exists()) dbFile.length() / 1024 else 0
+                            Text(
+                                "Size: $dbSizeKb KB",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold
                             )
                             Text(
                                 "Rolling window: ${state.retentionDays} days",
@@ -410,6 +430,23 @@ fun HealthScreen(state: HabitUiState) {
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                             )
+                            val telemetry = when (sensor.name) {
+                                "Accelerometer" -> state.latestContext?.accelEnergy?.let { "Energy: ${String.format(Locale.US, "%.1f", it)}" }
+                                "Gyroscope" -> state.latestContext?.gyroEnergy?.let { "Energy: ${String.format(Locale.US, "%.1f", it)}" }
+                                "Ambient Light" -> state.latestContext?.lightLux?.let { "${it.toInt()} lx" }
+                                "Proximity" -> state.latestContext?.proximityNear?.let { if (it) "Near" else "Far" }
+                                "Step Counter" -> state.latestContext?.stepsSinceLastSnapshot?.let { "$it steps" }
+                                else -> null
+                            }
+                            if (telemetry != null) {
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = telemetry,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                         Box(
                             modifier =
@@ -418,9 +455,9 @@ fun HealthScreen(state: HabitUiState) {
                                     .background(
                                         color =
                                             if (sensor.isAvailable) {
-                                                Color(0xFF10B981).copy(alpha = 0.2f)
+                                                StatusSuccess.copy(alpha = 0.2f)
                                             } else {
-                                                Color(0xFFEF4444).copy(alpha = 0.2f)
+                                                StatusError.copy(alpha = 0.2f)
                                             },
                                         shape = CircleShape,
                                     ),
@@ -429,7 +466,7 @@ fun HealthScreen(state: HabitUiState) {
                             Icon(
                                 imageVector = if (sensor.isAvailable) Icons.Default.Check else Icons.Default.Close,
                                 contentDescription = if (sensor.isAvailable) "Available" else "Not Available",
-                                tint = if (sensor.isAvailable) Color(0xFF10B981) else Color(0xFFEF4444),
+                                tint = if (sensor.isAvailable) StatusSuccess else StatusError,
                                 modifier = Modifier.size(20.dp),
                             )
                         }

@@ -12,6 +12,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -63,6 +64,11 @@ fun TopAppMiniChart(
                 )
 
                 val fraction = (duration.toFloat() / maxDuration.toFloat()).coerceIn(0f, 1f)
+                val animatedFraction by androidx.compose.animation.core.animateFloatAsState(
+                    targetValue = fraction,
+                    animationSpec = androidx.compose.animation.core.tween(durationMillis = 1000, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+                    label = "fraction"
+                )
 
                 Box(
                     modifier =
@@ -75,7 +81,7 @@ fun TopAppMiniChart(
                     Box(
                         modifier =
                             Modifier
-                                .fillMaxWidth(fraction = fraction)
+                                .fillMaxWidth(fraction = animatedFraction)
                                 .height(12.dp)
                                 .clip(RoundedCornerShape(6.dp))
                                 .background(MaterialTheme.colorScheme.primary),

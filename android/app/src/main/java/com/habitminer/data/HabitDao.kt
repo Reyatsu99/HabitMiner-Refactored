@@ -23,6 +23,9 @@ interface HabitDao {
     @Query("DELETE FROM discovered_habits")
     suspend fun deleteAll()
 
+    @Query("DELETE FROM discovered_habits WHERE lastSeenAt < :timestampMs")
+    suspend fun deleteOlderThan(timestampMs: Long)
+
     @Query("SELECT COUNT(*) FROM discovered_habits")
     fun getHabitCount(): Flow<Int>
 }

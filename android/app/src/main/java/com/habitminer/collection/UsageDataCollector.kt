@@ -125,7 +125,7 @@ class UsageDataCollector
 
             val result = mutableListOf<AppUsageEntity>()
             val startTimes = mutableMapOf<String, Long>()
-            val activeClasses = mutableMapOf<String, MutableSet<String>>()
+            val activeCounts = mutableMapOf<String, Int>()
 
             // Pre-compute event type constants outside the hot loop
             val foregroundEvent =
@@ -164,7 +164,7 @@ class UsageDataCollector
                     val activePkgs = startTimes.keys.toList()
                     for (activePkg in activePkgs) {
                         val start = startTimes.remove(activePkg)
-                        activeClasses.remove(activePkg)
+                        activeCounts.remove(activePkg)
                         if (start != null) {
                             val duration = event.timeStamp - start
                             if (duration > 2000) {
@@ -195,45 +195,43 @@ class UsageDataCollector
                 }
 
                 if (event.eventType == foregroundEvent) {
-                    val classes = activeClasses.getOrPut(pkg) { mutableSetOf() }
-                    val wasEmpty = classes.isEmpty()
-                    classes.add(cls)
-                    if (wasEmpty) {
+                    val count = activeCounts.getOrDefault(pkg, 0)
+                    if (count == 0) {
                         startTimes[pkg] = event.timeStamp
                     }
+                    activeCounts[pkg] = count + 1
                 } else if (event.eventType == backgroundEvent || event.eventType == stoppedEvent) {
-                    val classes = activeClasses[pkg]
-                    if (classes != null) {
-                        classes.remove(cls)
-                        if (classes.isEmpty()) {
-                            activeClasses.remove(pkg)
-                            val start = startTimes.remove(pkg)
-                            if (start != null) {
-                                val duration = event.timeStamp - start
-                                if (duration > 2000) { // filter > 2000ms
-                                    val cal = Calendar.getInstance().apply { timeInMillis = start }
-                                    val hour = cal.get(Calendar.HOUR_OF_DAY)
-                                    val dayOfWeek = cal.get(Calendar.DAY_OF_WEEK)
-
-                                    result.add(
-                                        AppUsageEntity(
-                                            id = stableSessionId(pkg, start),
-                                            packageName = pkg,
-                                            appName = appIdentityResolver.getAppName(pkg),
-                                            appCategory = getCategoryForPackage(pkg),
-                                            startTime = start,
-                                            endTime = event.timeStamp,
-                                            durationMs = duration,
-                                            timeSlot = getTimeSlot(hour),
-                                            dayType = getDayType(dayOfWeek),
-                                            isHistorical = isHistorical,
-                                        ),
-                                    )
-                                }
+                    val count = activeCounts.getOrDefault(pkg, 0)
+                    // ACTIVITY_STOPPED acts as a force-close (process kill): drain counter to 0
+                    val newCount = if (event.eventType == stoppedEvent) 0 else (count - 1).coerceAtLeast(0)
+                    if (newCount == 0) {
+                        activeCounts.remove(pkg)
+                        val start = startTimes.remove(pkg)
+                        if (start != null) {
+                            val duration = event.timeStamp - start
+                            if (duration > 2000) { // filter > 2000ms
+                                val cal = Calendar.getInstance().apply { timeInMillis = start }
+                                result.add(
+                                    AppUsageEntity(
+                                        id = stableSessionId(pkg, start),
+                                        packageName = pkg,
+                                        appName = appIdentityResolver.getAppName(pkg),
+                                        appCategory = getCategoryForPackage(pkg),
+                                        startTime = start,
+                                        endTime = event.timeStamp,
+                                        durationMs = duration,
+                                        timeSlot = getTimeSlot(cal.get(Calendar.HOUR_OF_DAY)),
+                                        dayType = getDayType(cal.get(Calendar.DAY_OF_WEEK)),
+                                        isHistorical = isHistorical,
+                                    ),
+                                )
                             }
                         }
                     } else {
-                        // Fallback: If we missed the foreground event, just clear start times if any
+                        activeCounts[pkg] = newCount
+                    }
+                    if (count == 0) {
+                        // Fallback: missed foreground event — clear any orphaned start time
                         startTimes.remove(pkg)
                     }
                 }
@@ -316,9 +314,9 @@ class UsageDataCollector
                 (hash xor char.code.toLong()) * 0x100000001b3L
             }.let { if (it == 0L) 1L else it }
 
-        suspend fun collectLast14Days(): List<AppUsageEntity> {
+        suspend fun collectHistoricalData(): List<AppUsageEntity> {
             val cal = Calendar.getInstance()
-            cal.add(Calendar.DAY_OF_YEAR, -14)
+            cal.add(Calendar.DAY_OF_YEAR, -7)
             return collectUsageSince(cal.timeInMillis, isHistorical = true)
         }
     }

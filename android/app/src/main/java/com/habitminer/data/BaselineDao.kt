@@ -22,4 +22,7 @@ interface BaselineDao {
 
     @Query("DELETE FROM baseline")
     suspend fun deleteAll()
+
+    @Query("DELETE FROM baseline WHERE updatedAt < :timestampMs")
+    suspend fun deleteOlderThan(timestampMs: Long)
 }

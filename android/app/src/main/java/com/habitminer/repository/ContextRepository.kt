@@ -37,6 +37,12 @@ class ContextRepository
 
         suspend fun getSnapshotsSince(sinceMs: Long): List<ContextSnapshotEntity> = contextDao.getSnapshotsSince(sinceMs)
 
+        suspend fun getUsageForDateRange(startMs: Long, endMs: Long): List<AppUsageEntity> = appUsageDao.getUsageForDateRange(startMs, endMs)
+
+        suspend fun getSnapshotsForDateRange(startMs: Long, endMs: Long): List<ContextSnapshotEntity> = contextDao.getSnapshotsForDateRange(startMs, endMs)
+
+        fun getAllSnapshots(): Flow<List<ContextSnapshotEntity>> = contextDao.getAllSnapshots()
+
         suspend fun getUsageRevision(): String = appUsageDao.getUsageRevision()
 
         suspend fun getModelRevision(beforeMs: Long): String =
@@ -75,6 +81,16 @@ class ContextRepository
         suspend fun insertAppUsage(usage: AppUsageEntity) = appUsageDao.insert(usage)
 
         suspend fun insertAllAppUsage(usages: List<AppUsageEntity>) = appUsageDao.insertAll(usages)
+
+        suspend fun insertDeviceEvent(event: com.habitminer.data.DeviceEventEntity) = deviceEventDao.insert(event)
+
+        suspend fun countDeviceEventsSince(eventType: String, sinceMs: Long): Int = deviceEventDao.countSince(eventType, sinceMs)
+
+        suspend fun clearOldData(retentionCutoffMs: Long) {
+            appUsageDao.deleteOlderThan(retentionCutoffMs)
+            contextDao.deleteOlderThan(retentionCutoffMs)
+            deviceEventDao.deleteOlderThan(retentionCutoffMs)
+        }
 
         suspend fun clearCollectedData() {
             appUsageDao.deleteAll()

@@ -29,6 +29,8 @@ class HabitRepository
 
         fun getRecentDeviations(limit: Int = 20): Flow<List<DeviationEntity>> = deviationDao.getRecentDeviations(limit)
 
+        fun getAllDeviations(): Flow<List<DeviationEntity>> = deviationDao.getAllDeviations()
+
         fun getTodayDeviations(startOfDayMs: Long): Flow<List<DeviationEntity>> = deviationDao.getTodayDeviations(startOfDayMs)
 
         suspend fun getBaseline(timeBin: String): BaselineEntity? = baselineDao.getBaseline(timeBin)
@@ -43,7 +45,16 @@ class HabitRepository
 
         suspend fun insertDeviation(deviation: DeviationEntity) = deviationDao.insert(deviation)
 
+        suspend fun deleteDeviation(deviationId: Long) = deviationDao.deleteById(deviationId)
+
         suspend fun deleteDeviationsSince(startOfDayMs: Long) = deviationDao.deleteSince(startOfDayMs)
+
+        suspend fun clearOldData(retentionCutoffMs: Long) {
+            habitDao.deleteOlderThan(retentionCutoffMs)
+            // Baselines intentionally excluded: only 8 time-bins exist and they must
+            // persist across inactivity periods so deviation detection keeps working.
+            deviationDao.deleteOlderThan(retentionCutoffMs)
+        }
 
         suspend fun clearModelData() {
             habitDao.deleteAll()

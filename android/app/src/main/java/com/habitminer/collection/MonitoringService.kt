@@ -13,7 +13,7 @@ import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
-import com.habitminer.data.DeviceEventDao
+import kotlinx.coroutines.flow.MutableStateFlow
 import com.habitminer.data.PrefsKeys
 import com.habitminer.domain.AppIdentityResolver
 import com.habitminer.repository.ContextRepository
@@ -41,9 +41,6 @@ class MonitoringService : Service() {
     lateinit var sensorCollector: SensorContextCollector
 
     @Inject
-    lateinit var eventDao: DeviceEventDao
-
-    @Inject
     lateinit var appIdentityResolver: AppIdentityResolver
 
     private val serviceJob = Job()
@@ -69,16 +66,14 @@ class MonitoringService : Service() {
         private const val CHANNEL_ID = "monitoring_channel"
         private const val INTERVAL_MS = 15 * 60 * 1000L // 15 minutes
 
-        // @Volatile ensures writes in Service main thread are visible to ViewModel coroutines (BP-4)
-        @Volatile
-        var isServiceRunning = false
-            private set
+        // MutableStateFlow for reactive liveness tracking
+        val isServiceRunning = MutableStateFlow(false)
     }
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        isServiceRunning = true
+        isServiceRunning.value = true
 
         // Initial population of the rich notification state to avoid "0m today" delay
         serviceScope.launch {
@@ -181,11 +176,11 @@ class MonitoringService : Service() {
                 set(Calendar.MILLISECOND, 0)
                 timeInMillis
             }
-        val unlockCount = eventDao.countSince(DeviceEventReceiver.EVENT_UNLOCK, startOfDay)
+        val unlockCount = contextRepository.countDeviceEventsSince(com.habitminer.collection.DeviceEventReceiver.EVENT_UNLOCK, startOfDay)
         val notificationsLastHour =
             if (HabitNotificationListener.isEnabled(this)) {
-                eventDao.countSince(
-                    DeviceEventReceiver.EVENT_NOTIFICATION,
+                contextRepository.countDeviceEventsSince(
+                    com.habitminer.collection.DeviceEventReceiver.EVENT_NOTIFICATION,
                     System.currentTimeMillis() - TimeUnit.HOURS.toMillis(1),
                 )
             } else {
@@ -367,7 +362,7 @@ class MonitoringService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        isServiceRunning = false
+        isServiceRunning.value = false
         // DO NOT call sensorCollector.shutdown() here. It's a @Singleton so its HandlerThread
         // must outlive this service lifecycle to support DataCollectionWorker and future restarts.
         serviceScope.cancel()

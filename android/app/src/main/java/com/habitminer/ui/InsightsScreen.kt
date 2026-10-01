@@ -37,8 +37,23 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.Tab
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.FastOutSlowInEasing
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun InsightsScreen(state: HabitUiState) {
+    var selectedTabIndex by remember { mutableIntStateOf(0) }
+    val tabs = listOf("Routines", "Deviations", "Blueprint")
+
     if (!state.hasEnoughData && state.recentDeviations.isEmpty() && state.discoveredHabits.isEmpty()) {
         LoadingState(
             message = "Building your habit model...\nCurrently at ${state.daysOfData}/5 days of required data.",
@@ -46,25 +61,42 @@ fun InsightsScreen(state: HabitUiState) {
         return
     }
 
-    LazyColumn(
-        modifier =
-            Modifier
+    Column(modifier = Modifier.fillMaxSize()) {
+        PrimaryTabRow(selectedTabIndex = selectedTabIndex) {
+            tabs.forEachIndexed { index, title ->
+                Tab(
+                    selected = selectedTabIndex == index,
+                    onClick = { selectedTabIndex = index },
+                    text = { Text(title) }
+                )
+            }
+        }
+        
+        LazyColumn(
+            modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(24.dp),
-    ) {
-        item {
-            Spacer(modifier = Modifier.height(24.dp))
-            Text(
-                text = "Insights",
-                style = MaterialTheme.typography.headlineLarge,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onBackground,
-            )
-            Spacer(modifier = Modifier.height(16.dp))
+            verticalArrangement = Arrangement.spacedBy(24.dp),
+        ) {
+            when (selectedTabIndex) {
+                0 -> routinesTabContent(state)
+                1 -> deviationsTabContent(state)
+                2 -> item {
+                    Spacer(modifier = Modifier.height(24.dp))
+                    InfoCard(
+                        title = "Behavioral Blueprint",
+                        message = "Coming soon! A comprehensive map of your habits."
+                    )
+                }
+            }
         }
+    }
+}
+
+fun androidx.compose.foundation.lazy.LazyListScope.routinesTabContent(state: HabitUiState) {
 
         item {
+            Spacer(modifier = Modifier.height(24.dp))
             SectionHeader("Routine predictability")
             Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(vertical = 16.dp)) {
@@ -103,24 +135,17 @@ fun InsightsScreen(state: HabitUiState) {
                 )
             }
         } else {
-            val visibleHabits = state.discoveredHabits.take(4)
-            items(visibleHabits, key = { it.id }) { habit ->
+            items(state.discoveredHabits, key = { it.id }) { habit ->
                 TypographicHabitItem(habit = habit)
                 Divider(color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f), modifier = Modifier.padding(vertical = 12.dp))
             }
-            if (state.discoveredHabits.size > 4) {
-                item {
-                    Text(
-                        text = "${state.discoveredHabits.size} patterns discovered  ·  View all →",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(vertical = 8.dp),
-                    )
-                }
-            }
         }
+        item { Spacer(modifier = Modifier.height(24.dp)) }
+}
 
+fun androidx.compose.foundation.lazy.LazyListScope.deviationsTabContent(state: HabitUiState) {
         item {
+            Spacer(modifier = Modifier.height(24.dp))
             SectionHeader("RECENT DEVIATIONS")
         }
 
@@ -132,25 +157,12 @@ fun InsightsScreen(state: HabitUiState) {
                 )
             }
         } else {
-            val visibleDeviations = state.recentDeviations.take(4)
-            items(visibleDeviations, key = { it.id + 100000L }) { dev ->
+            items(state.recentDeviations, key = { it.id + 100000L }) { dev ->
                 TypographicDeviationItem(dev = dev)
                 Divider(color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.1f), modifier = Modifier.padding(vertical = 12.dp))
             }
-            if (state.recentDeviations.size > 4) {
-                item {
-                    Text(
-                        text = "${state.recentDeviations.size} recent deviations  ·  View all →",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(vertical = 8.dp),
-                    )
-                }
-            }
         }
-
         item { Spacer(modifier = Modifier.height(24.dp)) }
-    }
 }
 
 @Composable
@@ -230,6 +242,12 @@ fun PredictabilityGauge(score: Float) {
         }
 
     val gaugeDescription = "Predictability gauge: ${score.toInt()}%"
+    val animatedScore by animateFloatAsState(
+        targetValue = score,
+        animationSpec = tween(durationMillis = 1500, easing = FastOutSlowInEasing),
+        label = "predictability_gauge"
+    )
+
     Box(
         contentAlignment = Alignment.Center,
         modifier =
@@ -248,7 +266,7 @@ fun PredictabilityGauge(score: Float) {
             drawArc(
                 color = color,
                 startAngle = 135f,
-                sweepAngle = 270f * (score / 100f).coerceIn(0f, 1f),
+                sweepAngle = 270f * (animatedScore / 100f).coerceIn(0f, 1f),
                 useCenter = false,
                 style = Stroke(width = 16.dp.toPx(), cap = StrokeCap.Round),
             )
