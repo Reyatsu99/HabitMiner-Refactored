@@ -19,6 +19,8 @@ jobs:
   build:
     name: Build APK and run unit tests
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     timeout-minutes: 40
     defaults:
       run:
@@ -116,6 +118,25 @@ jobs:
               msg = "\n".join(lines).replace("%", "%25").replace("\n", "%0A")
               print(f"::notice title=Room schema {path.split('/')[-1]}::{msg}")
           EOF
+
+      # Screenshot tests write PNGs; publish them to a separate branch so they can be
+      # reviewed without downloading artifacts.
+      - name: Publish screenshots
+        if: always() && hashFiles('android/app/build/screenshots/*.png') != ''
+        working-directory: .
+        run: |
+          set -e
+          mkdir -p /tmp/shots
+          cp android/app/build/screenshots/*.png /tmp/shots/
+          git config user.name "habitminer-ci"
+          git config user.email "habitminer-ci@users.noreply.github.com"
+          git checkout -q --orphan screenshots-tmp
+          git rm -rq --cached . > /dev/null
+          cp /tmp/shots/*.png .
+          echo "Screenshots for ${GITHUB_SHA} (${GITHUB_REF_NAME})" > SCREENSHOTS.md
+          git add -f ./*.png SCREENSHOTS.md
+          git commit -q -m "Screenshots for ${GITHUB_SHA}"
+          git push -q -f origin HEAD:refs/heads/ci-screenshots
 
       - name: Upload debug APK
         if: success()

@@ -135,7 +135,7 @@ class HabitViewModel
         private val insightsComputer: InsightsComputer,
         private val wifiPlaceProvider: com.habitminer.collection.WifiPlaceProvider,
         private val labelContextCapture: com.habitminer.proactive.LabelContextCapture,
-    ) : AndroidViewModel(application) {
+    ) : AndroidViewModel(application), HabitActions {
         private val _uiState = MutableStateFlow(HabitUiState(selectedHistoryDate = getStartOfDay()))
         val uiState: StateFlow<HabitUiState> = _uiState.asStateFlow()
         // One-shot event: emits the file path for the Share Sheet. replay=0 means no re-play
@@ -159,7 +159,7 @@ class HabitViewModel
             observeData()
         }
 
-        fun checkPermissions() {
+        override fun checkPermissions() {
             val application = getApplication<Application>()
             val appOps = application.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
             val mode =
@@ -211,7 +211,7 @@ class HabitViewModel
             }
         }
 
-        fun loadHistoricalData() {
+        override fun loadHistoricalData() {
             if (!_uiState.value.hasUsagePermission) return
             val application = getApplication<Application>()
             application.getSharedPreferences(PrefsKeys.PREFS_NAME, Context.MODE_PRIVATE)
@@ -337,7 +337,7 @@ class HabitViewModel
             }
         }
 
-        fun selectHistoryDate(timeInMillis: Long) {
+        override fun selectHistoryDate(timeInMillis: Long) {
             val startOfDay = Calendar.getInstance().apply {
                 this.timeInMillis = timeInMillis
                 set(Calendar.HOUR_OF_DAY, 0)
@@ -352,7 +352,7 @@ class HabitViewModel
          * Records whether a deviation was expected or unusual. Stored by fingerprint because
          * deviations are re-detected (and re-inserted) whenever today's data changes.
          */
-        fun giveDeviationFeedback(
+        override fun giveDeviationFeedback(
             deviation: DeviationEntity,
             value: String,
         ) {
@@ -371,11 +371,11 @@ class HabitViewModel
             _uiState.update { it.copy(pendingCheckInPromptedAt = promptedAt ?: System.currentTimeMillis()) }
         }
 
-        fun dismissCheckIn() {
+        override fun dismissCheckIn() {
             _uiState.update { it.copy(pendingCheckInPromptedAt = null) }
         }
 
-        fun answerCheckIn(option: com.habitminer.analytics.CheckInOption) {
+        override fun answerCheckIn(option: com.habitminer.analytics.CheckInOption) {
             val promptedAt = _uiState.value.pendingCheckInPromptedAt
             _uiState.update { it.copy(pendingCheckInPromptedAt = null) }
             viewModelScope.launch(Dispatchers.IO) {

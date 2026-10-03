@@ -25,6 +25,7 @@ android {
     }
 
     testOptions {
+        unitTests.includeAndroidResources = true
         unitTests.all {
             systemProperty 'net.bytebuddy.experimental', 'true'
         }
@@ -118,6 +119,12 @@ dependencies {
     androidTestImplementation 'androidx.test.ext:junit:1.1.5'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
     androidTestImplementation 'androidx.compose.ui:ui-test-junit4'
+
+    // Screenshot tests: render Compose screens on the JVM with Robolectric (native graphics)
+    testImplementation composeBom
+    testImplementation 'androidx.compose.ui:ui-test-junit4'
+    testImplementation 'org.robolectric:robolectric:4.14.1'
+    testImplementation 'androidx.test.ext:junit:1.1.5'
 
     // Room test helpers
     testImplementation "androidx.room:room-testing:$room_version"

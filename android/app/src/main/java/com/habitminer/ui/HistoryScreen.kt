@@ -43,7 +43,7 @@ import com.habitminer.analytics.TimeUtil
 import com.habitminer.data.ContextSnapshotEntity
 import com.habitminer.engine.AnalyticsMappers
 import com.habitminer.engine.HabitUiState
-import com.habitminer.engine.HabitViewModel
+import com.habitminer.engine.HabitActions
 import com.habitminer.ui.components.DayTimelineStrip
 import com.habitminer.ui.components.EmptyState
 import com.habitminer.ui.components.Hint
@@ -75,7 +75,7 @@ private sealed class HistoryItem {
 @Composable
 fun HistoryScreen(
     state: HabitUiState,
-    viewModel: HabitViewModel,
+    viewModel: HabitActions,
 ) {
     val filters = listOf("Everything", "Apps", "Surroundings")
     var filter by remember { mutableStateOf(filters[0]) }

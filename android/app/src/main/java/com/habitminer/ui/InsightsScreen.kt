@@ -52,7 +52,7 @@ import com.habitminer.analytics.SleepEstimate
 import com.habitminer.analytics.WeekComparison
 import com.habitminer.engine.AnalyticsMappers
 import com.habitminer.engine.HabitUiState
-import com.habitminer.engine.HabitViewModel
+import com.habitminer.engine.HabitActions
 import com.habitminer.ui.components.BodyText
 import com.habitminer.ui.components.CardHeader
 import com.habitminer.ui.components.Hint
@@ -75,7 +75,7 @@ private val dayTypeColors = listOf(Color(0xFF4FC3F7), Color(0xFFAB47BC), Color(0
 @Composable
 fun InsightsScreen(
     state: HabitUiState,
-    viewModel: HabitViewModel,
+    viewModel: HabitActions,
     initialTab: Int = 0,
 ) {
     var selectedTab by remember(initialTab) { mutableIntStateOf(initialTab) }
@@ -180,7 +180,7 @@ private fun PredictabilityCard(result: PredictabilityResult?) {
 
 private fun LazyListScope.deviationsTab(
     state: HabitUiState,
-    viewModel: HabitViewModel,
+    viewModel: HabitActions,
 ) {
     item {
         Column {

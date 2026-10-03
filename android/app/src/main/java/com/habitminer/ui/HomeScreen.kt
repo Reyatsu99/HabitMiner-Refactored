@@ -63,7 +63,7 @@ import com.habitminer.data.DeviationEntity
 import com.habitminer.data.UserLabelEntity
 import com.habitminer.engine.AnalyticsMappers
 import com.habitminer.engine.HabitUiState
-import com.habitminer.engine.HabitViewModel
+import com.habitminer.engine.HabitActions
 import com.habitminer.engine.TypicalUsageCalculator
 import com.habitminer.ui.components.BodyText
 import com.habitminer.ui.components.CardHeader
@@ -81,7 +81,7 @@ import com.habitminer.ui.theme.StatusWarning
 @Composable
 fun HomeScreen(
     state: HabitUiState,
-    viewModel: HabitViewModel,
+    viewModel: HabitActions,
     onOpenInsights: () -> Unit = {},
 ) {
     val scrollState = rememberScrollState()
@@ -160,7 +160,7 @@ fun HomeScreen(
 @Composable
 fun FirstRunExperience(
     state: HabitUiState,
-    viewModel: HabitViewModel,
+    viewModel: HabitActions,
 ) {
     Column(
         modifier = Modifier.fillMaxWidth().padding(top = 32.dp),
@@ -398,7 +398,7 @@ fun PickupsCard(
 @Composable
 fun TodayDeviationCard(
     state: HabitUiState,
-    viewModel: HabitViewModel,
+    viewModel: HabitActions,
 ) {
     val candidates =
         state.todayDeviations.filter { state.deviationFeedback[AnalyticsMappers.fingerprint(it)] != UserLabelEntity.FEEDBACK_EXPECTED }
