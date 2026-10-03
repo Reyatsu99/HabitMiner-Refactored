@@ -130,7 +130,7 @@ object SampleData {
             var t = TimeUtil.at(date, hour, minute, zone)
             if (t > now) return
             unlocks.add(t)
-            if (rnd.nextFloat() < 0.45f) notifications.add(TimedEvent(t - 40_000L, if (rnd.nextBoolean()) whatsapp.pkg else telegram.pkg))
+            if (rnd.nextFloat() < 0.45f || hour == 9 || hour == 19) notifications.add(TimedEvent(t - 40_000L, if (rnd.nextBoolean()) whatsapp.pkg else telegram.pkg))
             for ((app, mins) in steps) {
                 if (t > now) return
                 val m = minOf(mins, ((now - t) / 60_000L).toInt().coerceAtLeast(1))

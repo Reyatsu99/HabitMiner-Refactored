@@ -94,6 +94,8 @@ class DeviationDetector
                 if (!bin.startsWith("${todayDayType}_")) continue
                 val timeSlot = bin.substringAfter('_')
                 val slotWord = timeSlot.lowercase()
+                // "this morning", "this evening", but "tonight" rather than "this night".
+                val thisSlot = if (timeSlot == "NIGHT") "tonight" else "this $slotWord"
                 val progress = slotProgress[timeSlot] ?: continue
                 if (progress <= 0f) continue
                 val usages = groupedToday[bin].orEmpty()
@@ -112,7 +114,7 @@ class DeviationDetector
                                 timeBin = bin,
                                 deviationType = "EXCESS_DURATION",
                                 description =
-                                    "${formatDuration(todayDuration)} on your phone this $slotWord, " +
+                                    "${formatDuration(todayDuration)} on your phone $thisSlot, " +
                                         "compared with about ${formatDuration(expectedDuration)} by now on a usual day. " +
                                         "Most of it was $cat.",
                                 zScore = zScore,
@@ -138,7 +140,7 @@ class DeviationDetector
                                 timeBin = bin,
                                 deviationType = "NEW_BEHAVIOR",
                                 description =
-                                    "You used $cat for ${formatDuration(duration)} this $slotWord. " +
+                                    "You used $cat for ${formatDuration(duration)} $thisSlot. " +
                                         "It isn't usually part of your ${slotWord}s.",
                                 zScore = 2.0f,
                                 normalizedScore = 0.8f,
@@ -157,7 +159,7 @@ class DeviationDetector
                             deviationType = "MISSING_ROUTINE",
                             description =
                                 "You usually spend about ${formatDuration(base.avgScreenTimeMs)} on your phone " +
-                                    "in the $slotWord, but barely used it this $slotWord.",
+                                    "in the $slotWord, but barely used it $thisSlot.",
                             zScore = -2.0f,
                             normalizedScore = 0.7f,
                             affectedCategory = "ALL",

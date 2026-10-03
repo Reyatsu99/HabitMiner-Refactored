@@ -20,7 +20,7 @@ data class PredictabilityResult(
 
 object PredictabilityEvaluator {
     private const val MAX_GAP_MS = 15 * TimeUtil.MINUTE
-    const val MIN_TEST_TRANSITIONS = 30
+    const val MIN_TEST_TRANSITIONS = 20
 
     private data class Transition(val from: String, val to: String, val bin: String, val time: Long)
 

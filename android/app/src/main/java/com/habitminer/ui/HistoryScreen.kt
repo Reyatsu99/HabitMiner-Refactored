@@ -70,6 +70,31 @@ private sealed class HistoryItem {
         override val time: Long = snapshot.timestamp
         override val key: String = "c${snapshot.id}_${snapshot.timestamp}"
     }
+
+    /** Consecutive readings with the screen off, shown as one row instead of one per reading. */
+    data class ScreenOff(val readings: List<ContextSnapshotEntity>) : HistoryItem() {
+        override val time: Long = readings.first().timestamp
+        override val key: String = "o${readings.first().id}_${readings.first().timestamp}"
+    }
+}
+
+private fun hasSensors(s: ContextSnapshotEntity) = s.lightLux >= 0f || s.accelVariance >= 0f
+
+/** Groups runs of sensor-less (screen-off) readings so they don't flood the list. */
+private fun contextItems(snapshots: List<ContextSnapshotEntity>): List<HistoryItem> {
+    val out = mutableListOf<HistoryItem>()
+    var run = mutableListOf<ContextSnapshotEntity>()
+    for (s in snapshots.sortedBy { it.timestamp }) {
+        if (hasSensors(s)) {
+            if (run.isNotEmpty()) out.add(HistoryItem.ScreenOff(run))
+            run = mutableListOf()
+            out.add(HistoryItem.Context(s))
+        } else {
+            run.add(s)
+        }
+    }
+    if (run.isNotEmpty()) out.add(HistoryItem.ScreenOff(run))
+    return out
 }
 
 @Composable
@@ -120,7 +145,7 @@ fun HistoryScreen(
         remember(screenSessions, state.historicalSnapshots, filter) {
             val list = mutableListOf<HistoryItem>()
             if (filter != "Surroundings") screenSessions.forEach { list.add(HistoryItem.Session(it)) }
-            if (filter != "Apps") state.historicalSnapshots.forEach { list.add(HistoryItem.Context(it)) }
+            if (filter != "Apps") list.addAll(contextItems(state.historicalSnapshots))
             list.sortedByDescending { it.time }
         }
 
@@ -177,7 +202,21 @@ fun HistoryScreen(
             items(historyItems, key = { it.key }) { item ->
                 when (item) {
                     is HistoryItem.Session -> SessionCard(item.session, zone)
-                    is HistoryItem.Context -> ContextRow(item.snapshot)
+                    is HistoryItem.Context -> ContextRow(Labels.time(item.snapshot.timestamp), Labels.contextSummary(item.snapshot))
+                    is HistoryItem.ScreenOff -> {
+                        val first = item.readings.first()
+                        val last = item.readings.last()
+                        val range =
+                            if (item.readings.size == 1) Labels.time(first.timestamp) else "${Labels.time(first.timestamp)} – ${Labels.time(last.timestamp)}"
+                        val battery =
+                            if (first.batteryLevel in 0..100 && last.batteryLevel in 0..100) {
+                                if (first.batteryLevel == last.batteryLevel) " · ${last.batteryLevel}% battery" else " · battery ${first.batteryLevel}% → ${last.batteryLevel}%"
+                            } else {
+                                ""
+                            }
+                        val charging = if (item.readings.any { it.isCharging }) ", charging" else ""
+                        ContextRow(range, "Screen off$battery$charging")
+                    }
                 }
             }
         }
@@ -194,7 +233,7 @@ private fun DaySummaryCard(
     SurfaceCard {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             StatBlock("Screen time", Format.duration(totalMs))
-            StatBlock("Times you picked it up", "${sessions.size}", alignEnd = true, caption = "gaps over 5 min split sessions")
+            StatBlock("Sessions", "${sessions.size}", alignEnd = true, caption = "back-to-back app use counts as one")
         }
         Spacer(modifier = Modifier.height(14.dp))
         DayTimelineStrip(timeline)
@@ -246,7 +285,10 @@ private fun SessionCard(
 }
 
 @Composable
-private fun ContextRow(snapshot: ContextSnapshotEntity) {
+private fun ContextRow(
+    title: String,
+    detail: String,
+) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -260,13 +302,13 @@ private fun ContextRow(snapshot: ContextSnapshotEntity) {
         Spacer(modifier = Modifier.width(10.dp))
         Column {
             Text(
-                text = Labels.time(snapshot.timestamp),
+                text = title,
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.75f),
             )
             Text(
-                text = Labels.contextSummary(snapshot),
+                text = detail,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.65f),
             )

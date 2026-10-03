@@ -31,7 +31,6 @@ import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -385,11 +384,11 @@ fun PickupsCard(
             StatBlock("After a notification", Format.percent(stats.notificationShare), caption = "${stats.afterNotification} of ${stats.total}")
             StatBlock("On your own", "${stats.selfInitiated}", alignEnd = true, caption = "${stats.quickChecks} quick checks (<30s)")
         }
-        stats.topTriggers.firstOrNull()?.let {
+        stats.topTriggers.firstOrNull()?.takeIf { it.count >= 2 }?.let {
             Spacer(modifier = Modifier.height(8.dp))
             BodyText("Most pickups after a notification came from ${it.appName} (${it.count}).")
         }
-        stats.topFirstApps.firstOrNull()?.let {
+        stats.topFirstApps.firstOrNull()?.takeIf { it.count >= 2 }?.let {
             BodyText("The app you open first most often: ${it.appName}.")
         }
     }
@@ -530,9 +529,17 @@ fun ContextNowCard(state: HabitUiState) {
     }
 }
 
+/** Display-only tag (not a button, so it doesn't look tappable). */
 @Composable
 private fun ContextChip(text: String) {
-    FilterChip(selected = false, onClick = {}, label = { Text(text) })
+    Box(
+        modifier =
+            Modifier
+                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.07f), androidx.compose.foundation.shape.RoundedCornerShape(10.dp))
+                .padding(horizontal = 12.dp, vertical = 7.dp),
+    ) {
+        Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
+    }
 }
 
 @Composable

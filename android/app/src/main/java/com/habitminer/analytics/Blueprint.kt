@@ -258,39 +258,58 @@ object DayTypeClusterer {
         val k = if (days.size < 10) 2 else 3
         val assignment = kMeans(vectors, k)
 
-        // Reference volume: the average day. (The median picks one of the groups itself
-        // when there is an even split, so nothing would ever read as heavy or light.)
-        val meanTotal = vectors.map { it.sum() }.average().coerceAtLeast(1.0)
+        // Reference: the average day. Each group is named by how it differs from it,
+        // because "busiest block" alone gives every group the same name when one habit
+        // (e.g. late-night gaming) dominates every day.
+        val overall = DoubleArray(6) { b -> vectors.map { it[b] }.average() }
+        val meanTotal = overall.sum().coerceAtLeast(1.0)
 
         val clusters =
             (0 until k).mapNotNull { c ->
                 val members = days.indices.filter { assignment[it] == c }
                 if (members.isEmpty()) return@mapNotNull null
                 val centroid = DoubleArray(6) { b -> members.map { vectors[it][b] }.average() }
-                val total = centroid.sum()
-                val volume =
-                    when {
-                        total >= meanTotal * 1.25 -> "Heavy"
-                        total <= meanTotal * 0.75 -> "Light"
-                        else -> "Typical"
-                    }
-                val peak = centroid.indices.maxByOrNull { centroid[it] } ?: 0
-                Triple(members, centroid, "$volume ${blockNames[peak]} day" to peak)
+                members to centroid
             }
 
-        // Make names unique if two clusters ended up with the same label.
         val seen = mutableMapOf<String, Int>()
         val types =
-            clusters.map { (members, centroid, nameAndPeak) ->
-                val (baseName, peak) = nameAndPeak
+            clusters.map { (members, centroid) ->
+                val total = centroid.sum()
+                val ratio = total / meanTotal
+                val volume =
+                    when {
+                        ratio >= 1.1 -> "Heavier"
+                        ratio <= 0.9 -> "Lighter"
+                        else -> "Average"
+                    }
+                // The block where this group uses the phone most beyond the average day.
+                val diffs = DoubleArray(6) { b -> centroid[b] - overall[b] }
+                val distinct = diffs.indices.maxByOrNull { diffs[it] }!!
+                val feature =
+                    if (diffs[distinct] >= 10.0) {
+                        "more ${blockNames[distinct]} use"
+                    } else {
+                        val least = diffs.indices.minByOrNull { diffs[it] }!!
+                        "less ${blockNames[least]} use"
+                    }
+                val memberDays = members.map { days[it] }
+                val weekendShare = memberDays.count { TimeUtil.isWeekend(it) }.toDouble() / memberDays.size
+                val mix =
+                    when {
+                        memberDays.size >= 3 && weekendShare >= 0.7 -> " · mostly weekends"
+                        memberDays.size >= 3 && weekendShare <= 0.0 -> " · weekdays"
+                        else -> ""
+                    }
+                val baseName = "$volume days, $feature"
                 val n = (seen[baseName] ?: 0) + 1
                 seen[baseName] = n
-                val name = if (n == 1) baseName else "$baseName ($n)"
-                val avgMs = (centroid.sum() * TimeUtil.MINUTE).toLong()
+                val avgMs = (total * TimeUtil.MINUTE).toLong()
+                val peak = centroid.indices.maxByOrNull { centroid[it] } ?: 0
                 DayType(
-                    name = name.replaceFirstChar { it.uppercase() },
-                    description = "About ${Format.duration(avgMs)} a day · busiest ${blockRanges[peak]}",
-                    days = members.map { days[it] },
+                    name = if (n == 1) baseName else "$baseName ($n)",
+                    description = "About ${Format.duration(avgMs)} a day · busiest ${blockRanges[peak]}$mix",
+                    days = memberDays,
                     avgTotalMs = avgMs,
                     blocks = centroid,
                 )

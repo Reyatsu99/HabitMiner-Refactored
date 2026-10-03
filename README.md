@@ -31,6 +31,35 @@ The on-device **HabitEngine** aggregates this data to build temporal baselines (
 - **Battery Efficient & Resilient Monitoring**: Uses a persistent Foreground Service coupled with a fallback `WorkManager` for continuous, reliable data collection without being killed by OEM battery optimizations.
 - **Robust Data Pipeline**: Intelligent session deduplication merges overlapping app events, and context sensor rate-limiting prevents database bloating.
 
+### New in v1.2
+
+**Pervasive sensing and inference**
+- **Sleep & wake estimate**: the longest overnight stretch with the screen off, with confidence raised by charging and darkness. Also reports phone use in the hour before sleep and how much of it was in the dark.
+- **Pickup triggers**: each unlock is classified as notification-driven (a notification arrived within 2 minutes) or self-initiated, with quick checks (<30 s) counted separately.
+- **Context-tagged insights**: app sessions are joined with the nearest sensor reading, e.g. "45% of your Evony time is in the dark" or "used your phone while on the move 18 times".
+- **Battery-aware sensing**: the sampling interval adapts (5 min when moving with the screen on, 15 min normally, 30 min when idle). Health shows how long sensors were on today.
+- **Wi-Fi places (opt-in)**: screen time per place (Home / Campus / named by you), stored only as a salted hash of the access point.
+
+**Analytics views**
+- **Today**: usual-by-now comparison with a typical-day curve, apps or categories, sleep, pickups, routines, surroundings.
+- **History**: a 24-hour strip of app use by category with a light/motion/charging lane and sleep, sessions summarised per app.
+- **Insights → Blueprint**: week heatmap (tap for details), typical day, day types (k-means on daily usage profiles), this week vs last week, sleep, context insights, places.
+- **Routines**: the same app sequence is grouped across time slots, worded as "Seen on 10 of the last 10 weekday nights".
+- **Predictability**: measured next-app hit rate on the last 3 days against "most-used app" and random baselines.
+
+**Ground-truth labels**
+- **Check-ins** ("what are you doing?") up to 3 a day, 09:00–22:00, answerable from the notification.
+- **Expected / Unusual** feedback on every deviation.
+- Both are stored with the context at answer time and included in the ZIP export (`labels_*.csv`).
+
+**Proactive**
+- **Nudges** after 25 minutes of late-night leisure use or an hour straight in the day.
+- **Weekly summary** every Sunday evening. Check-ins and nudges share a limit of 3 prompts per day; everything can be switched off in Settings.
+
+**Quality**
+- Plain-Kotlin analytics in `analytics/` with unit tests, plus screenshot tests (Robolectric) for the main screens.
+- CI builds the APK and runs all tests on every push (`.github/workflows/android.yml`).
+
 ---
 
 ## 🏗️ Modern Android Architecture
@@ -98,6 +127,7 @@ The app requires the following permissions to function fully:
 - **Physical Activity**: To detect your current motion state.
 - **Notifications**: To monitor digital interruptions.
 - **Ignore Battery Optimizations**: Required on some OEMs to keep the background collection service alive.
+- **Location (optional)**: Only if you turn on Wi-Fi places. Android requires it to reveal which Wi-Fi network you're connected to; no location is recorded.
 
 The app provides a seamless onboarding flow via the **HealthScreen** to grant and monitor these permissions.
 

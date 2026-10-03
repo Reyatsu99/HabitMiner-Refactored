@@ -331,7 +331,8 @@ fun DayTimelineStrip(
     modifier: Modifier = Modifier,
 ) {
     val track = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f)
-    val sleepColor = Color(0xFF5C6BC0).copy(alpha = 0.35f)
+    // Sleep gets its own neutral lane so it can't be confused with an app colour or "dark".
+    val sleepColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f)
     val darkColor = Color(0xFF3949AB)
     val dimColor = Color(0xFFFFB74D)
     val brightColor = Color(0xFFFFEE58)
@@ -344,21 +345,23 @@ fun DayTimelineStrip(
             modifier =
                 Modifier
                     .fillMaxWidth()
-                    .height(52.dp)
+                    .height(62.dp)
                     .semantics { contentDescription = "Timeline of phone use, ${Format.duration(data.totalMs)} in total" },
         ) {
             val w = size.width
             fun x(minute: Int) = w * minute / (24f * 60f)
-            val usageTop = 0f
+            val sleepTop = 0f
+            val sleepH = 5.dp.toPx()
+            val usageTop = 9.dp.toPx()
             val usageH = 22.dp.toPx()
-            val ctxTop = 30.dp.toPx()
+            val ctxTop = 40.dp.toPx()
             val ctxH = 10.dp.toPx()
-            val chargeTop = 44.dp.toPx()
+            val chargeTop = 54.dp.toPx()
 
-            drawRoundRect(track, Offset(0f, usageTop), Size(w, usageH), CornerRadius(4.dp.toPx()))
             data.sleepBands.forEach { (s, e) ->
-                drawRect(sleepColor, Offset(x(s), usageTop), Size((x(e) - x(s)).coerceAtLeast(1f), usageH))
+                drawRoundRect(sleepColor, Offset(x(s), sleepTop), Size((x(e) - x(s)).coerceAtLeast(2f), sleepH), CornerRadius(2.dp.toPx()))
             }
+            drawRoundRect(track, Offset(0f, usageTop), Size(w, usageH), CornerRadius(4.dp.toPx()))
             data.segments.forEach { seg ->
                 drawRect(
                     categoryColor(seg.category),
@@ -397,7 +400,7 @@ fun DayTimelineStrip(
         }
         Spacer(modifier = Modifier.height(6.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            LegendDot(sleepColor.copy(alpha = 0.8f), "Sleep")
+            LegendDot(sleepColor, "Sleep (top line)")
             LegendDot(darkColor, "Dark")
             LegendDot(dimColor, "Dim")
             LegendDot(brightColor, "Bright")
