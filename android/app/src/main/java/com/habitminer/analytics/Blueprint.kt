@@ -294,48 +294,44 @@ object DayTypeClusterer {
             return DayTypes(listOf(single), days.associateWith { 0 })
         }
 
-        val seen = mutableMapOf<String, Int>()
+        // Name groups by rank of daily volume (plain words people understand), and describe
+        // where each group's extra use sits compared with the average day.
+        val ranked = clusters.sortedByDescending { it.second.sum() }
+        val rankNames =
+            when (ranked.size) {
+                1 -> listOf("Your usual days")
+                2 -> listOf("Busier days", "Quieter days")
+                else -> listOf("Busier days", "In-between days", "Quieter days")
+            }
         val types =
-            clusters.map { (members, centroid) ->
+            ranked.mapIndexed { rank, (members, centroid) ->
                 val total = centroid.sum()
-                val ratio = total / meanTotal
-                val volume =
-                    when {
-                        ratio >= 1.1 -> "Heavier"
-                        ratio <= 0.9 -> "Lighter"
-                        else -> "Average"
-                    }
-                // The block where this group uses the phone most beyond the average day.
-                val diffs = DoubleArray(6) { b -> centroid[b] - overall[b] }
-                val distinct = diffs.indices.maxByOrNull { diffs[it] }!!
-                val feature =
-                    if (diffs[distinct] >= 10.0) {
-                        "more ${blockNames[distinct]} use"
-                    } else {
-                        val least = diffs.indices.minByOrNull { diffs[it] }!!
-                        "less ${blockNames[least]} use"
-                    }
                 val memberDays = members.map { days[it] }
                 val weekendShare = memberDays.count { TimeUtil.isWeekend(it) }.toDouble() / memberDays.size
                 val mix =
                     when {
-                        memberDays.size >= 3 && weekendShare >= 0.7 -> " · mostly weekends"
-                        memberDays.size >= 3 && weekendShare <= 0.0 -> " · weekdays"
+                        memberDays.size >= 2 && weekendShare >= 0.7 -> " (mostly weekends)"
+                        memberDays.size >= 3 && weekendShare == 0.0 -> " (weekdays)"
                         else -> ""
                     }
-                val baseName = "$volume days, $feature"
-                val n = (seen[baseName] ?: 0) + 1
-                seen[baseName] = n
-                val avgMs = (total * TimeUtil.MINUTE).toLong()
+                val diffs = DoubleArray(6) { b -> centroid[b] - overall[b] }
+                val extra = diffs.indices.maxByOrNull { diffs[it] }!!
                 val peak = centroid.indices.maxByOrNull { centroid[it] } ?: 0
+                val where =
+                    if (diffs[extra] >= 10.0) {
+                        "extra use ${blockRanges[extra]}"
+                    } else {
+                        "busiest ${blockRanges[peak]}"
+                    }
+                val avgMs = (total * TimeUtil.MINUTE).toLong()
                 DayType(
-                    name = if (n == 1) baseName else "$baseName ($n)",
-                    description = "About ${Format.duration(avgMs)} a day · busiest ${blockRanges[peak]}$mix",
+                    name = rankNames.getOrElse(rank) { "Group ${rank + 1}" } + mix,
+                    description = "About ${Format.duration(avgMs)} a day · $where",
                     days = memberDays,
                     avgTotalMs = avgMs,
                     blocks = centroid,
                 )
-            }.sortedByDescending { it.days.size }
+            }
 
         val dayToType = mutableMapOf<LocalDate, Int>()
         types.forEachIndexed { idx, t -> t.days.forEach { dayToType[it] = idx } }

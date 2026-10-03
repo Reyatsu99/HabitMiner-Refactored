@@ -285,13 +285,29 @@ private fun DayTypesCard(dayTypes: DayTypes?) {
             Hint("Needs at least 6 full days of data to group your days.")
             return@SurfaceCard
         }
+        val maxBlock = dayTypes.types.maxOf { t -> t.blocks.maxOrNull() ?: 0.0 }.coerceAtLeast(1.0)
         dayTypes.types.forEachIndexed { i, type ->
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
-                Box(modifier = Modifier.size(12.dp).clip(RoundedCornerShape(3.dp)).background(dayTypeColors[i % dayTypeColors.size]))
+            val color = dayTypeColors[i % dayTypeColors.size]
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 5.dp)) {
+                Box(modifier = Modifier.size(12.dp).clip(RoundedCornerShape(3.dp)).background(color))
                 Spacer(modifier = Modifier.width(10.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(type.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
                     Hint("${type.description} · ${type.days.size} days")
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                // Shape of the day in six 4-hour blocks from midnight.
+                Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.height(28.dp)) {
+                    type.blocks.forEach { m ->
+                        Box(
+                            modifier =
+                                Modifier
+                                    .width(6.dp)
+                                    .height((28 * (m / maxBlock)).coerceAtLeast(2.0).dp)
+                                    .clip(RoundedCornerShape(2.dp))
+                                    .background(color),
+                        )
+                    }
                 }
             }
         }
@@ -323,7 +339,8 @@ private fun DayTypesCard(dayTypes: DayTypes?) {
             if (dayTypes.types.size == 1) {
                 "Your days are very similar, so there's one kind of day so far. Groups appear when your days start to differ."
             } else {
-                "Days are grouped by when and how much you used your phone (k-means clustering)."
+                "Days are grouped by when and how much you used your phone (k-means clustering). " +
+                    "Small bars show each group's use in 4-hour blocks from midnight."
             },
         )
     }

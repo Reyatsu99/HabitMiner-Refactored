@@ -204,8 +204,9 @@ class BlueprintTest {
         for (i in 6..9) sessions.add(s("Mail", d(i), 9, 0, 30))
         val types = DayTypeClusterer.cluster(sessions, d(10), ZONE)!!
         assertEquals(2, types.types.size)
-        assertTrue(types.types.any { it.name == "Heavier days, more late-night use" })
-        assertTrue(types.types.any { it.name == "Lighter days, more morning use" })
+        assertEquals("Busier days", types.types[0].name)
+        assertTrue(types.types[0].description.contains("extra use 00–04"))
+        assertEquals("Quieter days (weekdays)", types.types[1].name)
         assertEquals(types.dayToType[d(2)], types.dayToType[d(3)])
     }
 
