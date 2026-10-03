@@ -83,6 +83,24 @@ class UsageDataCollector
             }
         }
 
+        /**
+         * Counts today's unlocks from the system event log (KEYGUARD_HIDDEN, API 28+).
+         * Unlike our USER_PRESENT receiver this also sees unlocks that happened while
+         * HabitMiner was not running. Returns null when the platform can't provide it.
+         */
+        fun countUnlocksSince(sinceMs: Long): Int? {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return null
+            val usageStatsManager = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+            val events = usageStatsManager.queryEvents(sinceMs, System.currentTimeMillis()) ?: return null
+            val event = UsageEvents.Event()
+            var count = 0
+            while (events.hasNextEvent()) {
+                events.getNextEvent(event)
+                if (event.eventType == UsageEvents.Event.KEYGUARD_HIDDEN) count++
+            }
+            return count
+        }
+
         fun getDayType(dayOfWeek: Int): String {
             return if (dayOfWeek == Calendar.SATURDAY || dayOfWeek == Calendar.SUNDAY) {
                 "WEEKEND"

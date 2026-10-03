@@ -21,7 +21,16 @@ class BaselineBuilder
             snapshots: List<ContextSnapshotEntity>,
         ): List<BaselineEntity> {
             val startMs = allUsage.minOfOrNull { it.startTime } ?: return emptyList()
-            val endMs = System.currentTimeMillis()
+            // Only count fully-elapsed days. The caller passes history from before today, so
+            // counting today as a calendar day padded it as a zero-usage day and dragged
+            // every baseline average down.
+            val endMs =
+                Calendar.getInstance().apply {
+                    set(Calendar.HOUR_OF_DAY, 0)
+                    set(Calendar.MINUTE, 0)
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }.timeInMillis - 1
             val validUsage = allUsage.filterNot { appIdentityResolver.isLauncher(it.packageName) }
             val gson = Gson()
             val newBaselines = mutableListOf<BaselineEntity>()

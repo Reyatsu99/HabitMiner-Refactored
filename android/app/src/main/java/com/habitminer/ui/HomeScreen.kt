@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import com.habitminer.data.ContextSnapshotEntity
 import com.habitminer.engine.HabitUiState
 import com.habitminer.engine.HabitViewModel
+import com.habitminer.engine.TypicalUsageCalculator
 import com.habitminer.ui.components.HabitCard
 import com.habitminer.ui.components.DeviationCard
 import com.habitminer.ui.components.TopAppMiniChart
@@ -275,7 +276,6 @@ fun LearningStatusHeader(state: HabitUiState) {
 @Composable
 fun TodayUsageCard(state: HabitUiState) {
     val screenTimeMs = state.todayScreenTimeMs
-    val targetMs = if (state.expectedScreenTimeMs > 0L) state.expectedScreenTimeMs else -1L
 
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -317,65 +317,102 @@ fun TodayUsageCard(state: HabitUiState) {
                 }
             }
 
-            if (targetMs > 0) {
-                val tHours = targetMs / (1000 * 60 * 60)
-                val tMins = (targetMs / (1000 * 60)) % 60
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Column {
-                        Text(
-                            text = "Typical",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                        )
-                        Text(
-                            text = "${tHours}h ${tMins}m",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
-                    }
-                    
-                    Column(horizontalAlignment = Alignment.End) {
-                        val diffMs = screenTimeMs - targetMs
-                        val diffSign = if (diffMs > 0) "+" else "−"
-                        val diffMins = Math.abs(diffMs) / (1000 * 60)
-                        val diffColor = if (diffMs > 0) StatusError else StatusSuccess
-
-                        Text(
-                            text = "Difference",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                        )
-                        Text(
-                            text = "$diffSign$diffMins min",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = diffColor,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                    }
-                }
-            } else {
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = "Typical for this period",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                )
-                Text(
-                    text = "Building...",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-            }
-
+            Spacer(modifier = Modifier.height(16.dp))
+            TypicalComparison(screenTimeMs = screenTimeMs, typical = state.typicalUsage)
             Spacer(modifier = Modifier.height(24.dp))
 
             // Top App Mini Chart
             TopAppMiniChart(appUsages = state.todayUsageByApp)
         }
+    }
+}
+
+@Composable
+private fun TypicalComparison(
+    screenTimeMs: Long,
+    typical: TypicalUsageCalculator.TypicalUsage?,
+) {
+    val labelColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+
+    if (typical == null) {
+        Text(
+            text = "Typical by now",
+            style = MaterialTheme.typography.labelMedium,
+            color = labelColor,
+        )
+        Text(
+            text = "Needs one full day of history",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        return
+    }
+
+    val expected = typical.expectedByNowMs
+    val diffMs = screenTimeMs - expected
+    // Within ±10% (or ±10 min) of typical counts as "about usual".
+    val tolerance = maxOf(expected / 10, 10 * 60_000L)
+    val (diffText, diffColor) =
+        when {
+            diffMs > tolerance -> "+${formatDurationShort(diffMs)} more" to StatusError
+            diffMs < -tolerance -> "${formatDurationShort(-diffMs)} less" to StatusSuccess
+            else -> "About usual" to MaterialTheme.colorScheme.onSurface
+        }
+
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Column {
+            Text(
+                text = "Typical by now",
+                style = MaterialTheme.typography.labelMedium,
+                color = labelColor,
+            )
+            Text(
+                text = formatDurationShort(expected),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+        Column(horizontalAlignment = Alignment.End) {
+            Text(
+                text = "Difference",
+                style = MaterialTheme.typography.labelMedium,
+                color = labelColor,
+            )
+            Text(
+                text = diffText,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = diffColor,
+            )
+        }
+    }
+
+    val dayWord = if (typical.daysUsed == 1) "day" else "days"
+    val basisText =
+        when (typical.basis) {
+            TypicalUsageCalculator.Basis.SAME_DAY_TYPE ->
+                "${typical.daysUsed} ${typical.dayType.lowercase()} $dayWord"
+            TypicalUsageCalculator.Basis.ALL_DAYS ->
+                "last ${typical.daysUsed} $dayWord (not enough ${typical.dayType.lowercase()}s yet)"
+        }
+    Spacer(modifier = Modifier.height(6.dp))
+    Text(
+        text = "Usually ${formatDurationShort(typical.expectedFullDayMs)} by end of day · based on $basisText",
+        style = MaterialTheme.typography.bodySmall,
+        color = labelColor,
+    )
+}
+
+private fun formatDurationShort(ms: Long): String {
+    val totalMinutes = (ms / 60_000L).coerceAtLeast(0L)
+    val h = totalMinutes / 60
+    val m = totalMinutes % 60
+    return when {
+        h == 0L -> "${m}m"
+        m == 0L -> "${h}h"
+        else -> "${h}h ${m}m"
     }
 }
 

@@ -38,6 +38,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
@@ -76,6 +77,7 @@ data class HabitUiState(
     val hasNotificationPermission: Boolean = false,
     val hasRuntimePermissions: Boolean = false,
     val expectedScreenTimeMs: Long = 0L,
+    val typicalUsage: TypicalUsageCalculator.TypicalUsage? = null,
     val exportMessage: String? = null,
     val usageRecordCount: Int = 0,
     val liveUsageRecordCount: Int = 0,
@@ -476,12 +478,50 @@ class HabitViewModel
                         }
                     }
 
+                    // Unlock count recorded by our own receiver (only counts while the app is running).
+                    val snapshotUnlocks = MutableStateFlow(0)
                     launch {
                         contextRepository.getLatestSnapshot().collect { snapshot ->
+                            val isToday = snapshot != null && snapshot.timestamp >= getStartOfDay()
+                            snapshotUnlocks.value = if (isToday) snapshot!!.unlockCount else 0
+                            _uiState.update { it.copy(latestContext = snapshot) }
+                        }
+                    }
+
+                    // Once-a-minute refresh of time-dependent values: "typical by now" comparison
+                    // and today's unlock count from the system event log.
+                    val minuteTicker =
+                        flow {
+                            while (currentCoroutineContext().isActive) {
+                                emit(System.currentTimeMillis())
+                                delay(60_000L)
+                            }
+                        }
+                    launch {
+                        combine(allUsageCache, minuteTicker, snapshotUnlocks) { usage, now, recorded ->
+                            Triple(usage, now, recorded)
+                        }.collectLatest { (usage, now, recorded) ->
+                            val typical =
+                                withContext(Dispatchers.Default) {
+                                    TypicalUsageCalculator.compute(
+                                        usage
+                                            .filterNot { appIdentityResolver.isLauncher(it.packageName) }
+                                            .map { TypicalUsageCalculator.Interval(it.startTime, it.endTime, it.durationMs) },
+                                        now,
+                                    )
+                                }
+                            val systemUnlocks =
+                                if (_uiState.value.hasUsagePermission) {
+                                    withContext(Dispatchers.IO) {
+                                        runCatching { usageDataCollector.countUnlocksSince(getStartOfDay()) }.getOrNull()
+                                    }
+                                } else {
+                                    null
+                                }
                             _uiState.update {
                                 it.copy(
-                                    latestContext = snapshot,
-                                    todayUnlocks = snapshot?.unlockCount ?: 0,
+                                    typicalUsage = typical,
+                                    todayUnlocks = maxOf(recorded, systemUnlocks ?: 0),
                                 )
                             }
                         }
