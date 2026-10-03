@@ -210,6 +210,15 @@ class BlueprintTest {
     }
 
     @Test
+    fun `near-identical days are reported as one consistent type`() {
+        val sessions = mutableListOf(s("A", d(1), 9, 0, 5))
+        for (i in 2..9) sessions.add(s("Game", d(i), 0, 0, 120L + (i % 3) * 5L))
+        val types = DayTypeClusterer.cluster(sessions, d(10), ZONE)!!
+        assertEquals(1, types.types.size)
+        assertEquals("Consistent days", types.types.single().name)
+    }
+
+    @Test
     fun `week comparison averages per day`() {
         val today = LocalDate.of(2026, 10, 20)
         val sessions = mutableListOf<UsageSession>()

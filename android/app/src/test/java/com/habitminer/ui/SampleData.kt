@@ -209,7 +209,7 @@ object SampleData {
                     timestamp = TimeUtil.at(today, 2, 40, zone),
                     timeBin = "WEEKEND_NIGHT",
                     deviationType = "EXCESS_DURATION",
-                    description = "3h 10m on your phone this night, compared with about 2h by now on a usual day. Most of it was Evony.",
+                    description = "3h 10m on your phone tonight, compared with about 2h by now on a usual day. Most of it was Evony.",
                     zScore = 2.4f,
                     normalizedScore = 0.9f,
                     affectedCategory = "Evony",

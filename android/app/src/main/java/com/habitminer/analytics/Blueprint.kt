@@ -272,6 +272,28 @@ object DayTypeClusterer {
                 members to centroid
             }
 
+        // k-means always returns k groups, even when every day looks the same. If no group
+        // differs from the average day by at least 15% in volume or 30 minutes in any 4-hour
+        // block, say the days are consistent instead of inventing weak distinctions.
+        val distinct =
+            clusters.any { (_, centroid) ->
+                kotlin.math.abs(centroid.sum() / meanTotal - 1.0) >= 0.15 ||
+                    centroid.indices.any { kotlin.math.abs(centroid[it] - overall[it]) >= 30.0 }
+            }
+        if (!distinct) {
+            val avgMs = (meanTotal * TimeUtil.MINUTE).toLong()
+            val peak = overall.indices.maxByOrNull { overall[it] } ?: 0
+            val single =
+                DayType(
+                    name = "Consistent days",
+                    description = "Your days look alike: about ${Format.duration(avgMs)} a day · busiest ${blockRanges[peak]}",
+                    days = days,
+                    avgTotalMs = avgMs,
+                    blocks = overall,
+                )
+            return DayTypes(listOf(single), days.associateWith { 0 })
+        }
+
         val seen = mutableMapOf<String, Int>()
         val types =
             clusters.map { (members, centroid) ->

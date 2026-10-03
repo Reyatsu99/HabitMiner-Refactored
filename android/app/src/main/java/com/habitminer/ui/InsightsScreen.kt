@@ -319,7 +319,13 @@ private fun DayTypesCard(dayTypes: DayTypes?) {
             }
         }
         Spacer(modifier = Modifier.height(6.dp))
-        Hint("Days are grouped by when and how much you used your phone (k-means clustering).")
+        Hint(
+            if (dayTypes.types.size == 1) {
+                "Your days are very similar, so there's one kind of day so far. Groups appear when your days start to differ."
+            } else {
+                "Days are grouped by when and how much you used your phone (k-means clustering)."
+            },
+        )
     }
 }
 
