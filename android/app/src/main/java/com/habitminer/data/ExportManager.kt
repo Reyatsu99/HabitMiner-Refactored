@@ -19,6 +19,7 @@ class ExportManager
         @ApplicationContext private val context: Context,
         private val contextRepository: com.habitminer.repository.ContextRepository,
         private val habitRepository: com.habitminer.repository.HabitRepository,
+        private val feedbackRepository: com.habitminer.repository.FeedbackRepository,
     ) {
         suspend fun exportDataToCsv(): String? {
             try {
@@ -54,13 +55,14 @@ class ExportManager
                 FileWriter(contextFile).use { writer ->
                     writer.append("id,timestamp,accelMean,accelVariance,accelStd,accelMin,accelMax,accelEnergy,")
                     writer.append("gyroMean,gyroVariance,gyroStd,gyroMin,gyroMax,gyroEnergy,lightLux,proximityNear,")
-                    writer.append("stepsSinceLastSnapshot,batteryLevel,isCharging,isScreenOn,unlockCount,notificationsLastHour\n")
+                    writer.append("stepsSinceLastSnapshot,batteryLevel,isCharging,isScreenOn,unlockCount,notificationsLastHour,")
+                    writer.append("wifiPlace,sensingMs\n")
                     contexts.forEach {
                         writer.append("${it.id},${it.timestamp},${it.accelMean},${it.accelVariance},${it.accelStd},${it.accelMin},")
                         writer.append("${it.accelMax},${it.accelEnergy},${it.gyroMean},${it.gyroVariance},${it.gyroStd},${it.gyroMin},")
                         writer.append("${it.gyroMax},${it.gyroEnergy},${it.lightLux},${it.proximityNear ?: ""},")
                         writer.append("${it.stepsSinceLastSnapshot},${it.batteryLevel},${it.isCharging},${it.isScreenOn},")
-                        writer.append("${it.unlockCount},${it.notificationsLastHour}\n")
+                        writer.append("${it.unlockCount},${it.notificationsLastHour},${it.wifiPlace ?: ""},${it.sensingMs}\n")
                     }
                 }
 
@@ -108,10 +110,31 @@ class ExportManager
                     }
                 }
 
-                // 6. Zip everything
+                // 6. Labels: check-in answers and deviation feedback (ground truth for evaluation)
+                val labelsFile = File(exportDir, "labels_$timestamp.csv")
+                val labels = feedbackRepository.getAllLabels().firstOrNull() ?: emptyList()
+                FileWriter(labelsFile).use { writer ->
+                    writer.append("id,timestamp,kind,value,refKey,promptedAt,contextJson\n")
+                    labels.forEach {
+                        writer.append("${it.id},${it.timestamp},${escapeCsv(it.kind)},${escapeCsv(it.value)},")
+                        writer.append("${escapeCsv(it.refKey ?: "")},${it.promptedAt ?: ""},${escapeCsv(it.contextJson ?: "")}\n")
+                    }
+                }
+
+                // 7. Wi-Fi places (hashed IDs and the names given to them)
+                val placesFile = File(exportDir, "places_$timestamp.csv")
+                val places = feedbackRepository.getPlaces().firstOrNull() ?: emptyList()
+                FileWriter(placesFile).use { writer ->
+                    writer.append("placeHash,label,firstSeen,lastSeen\n")
+                    places.forEach {
+                        writer.append("${it.placeHash},${escapeCsv(it.label ?: "")},${it.firstSeen},${it.lastSeen}\n")
+                    }
+                }
+
+                // 8. Zip everything
                 val zipFile = File(exportDir, "habitminer_export_$timestamp.zip")
                 java.util.zip.ZipOutputStream(java.io.FileOutputStream(zipFile)).use { zos ->
-                    listOf(usageFile, contextFile, habitsFile, baselinesFile, deviationsFile).forEach { file ->
+                    listOf(usageFile, contextFile, habitsFile, baselinesFile, deviationsFile, labelsFile, placesFile).forEach { file ->
                         if (file.exists()) {
                             zos.putNextEntry(java.util.zip.ZipEntry(file.name))
                             file.inputStream().use { it.copyTo(zos) }

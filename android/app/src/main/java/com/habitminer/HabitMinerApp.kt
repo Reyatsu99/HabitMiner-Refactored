@@ -25,6 +25,7 @@ class HabitMinerApp :
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        com.habitminer.proactive.Notifier.createChannels(this)
     }
 
     private fun createNotificationChannel() {

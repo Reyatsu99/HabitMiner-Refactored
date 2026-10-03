@@ -33,6 +33,9 @@ class DataCollectionWorker
         private val appIdentityResolver: AppIdentityResolver,
         private val contextRepository: ContextRepository,
         private val habitRepository: com.habitminer.repository.HabitRepository,
+        private val feedbackRepository: com.habitminer.repository.FeedbackRepository,
+        private val wifiPlaceProvider: WifiPlaceProvider,
+        private val proactiveEngine: com.habitminer.proactive.ProactiveEngine,
     ) : CoroutineWorker(appContext, workerParams) {
         override suspend fun doWork(): Result =
             workerMutex.withLock {
@@ -46,6 +49,7 @@ class DataCollectionWorker
                     val retentionCutoff = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(retentionDays.toLong())
                     contextRepository.clearOldData(retentionCutoff)
                     habitRepository.clearOldData(retentionCutoff)
+                    feedbackRepository.clearOldData(retentionCutoff)
 
                     val lastTimestamp =
                         contextRepository.getLastInsertedUsageTimestamp()
@@ -106,6 +110,7 @@ class DataCollectionWorker
                         if (contextRepository.shouldSkipContextCollection()) {
                             Log.d(TAG, "Skipping context collection: recent snapshot exists")
                         } else {
+                            val place = wifiPlaceProvider.currentPlaceHash()
                             val snapshot =
                                 sensorCollector.collectSnapshot(
                                     unlockCount = unlockCount,
@@ -114,11 +119,16 @@ class DataCollectionWorker
                                     collectSensors = shouldSampleSensors,
                                     batteryLevel = batteryLevel,
                                     isCharging = isCharging,
+                                    wifiPlace = place,
                                 )
 
                             contextRepository.insertSnapshot(snapshot)
+                            if (place != null) feedbackRepository.recordPlaceSeen(place, snapshot.timestamp)
                         }
                     }
+
+                    // Fallback for check-ins/nudges/digest when the foreground service was killed.
+                    if (!MonitoringService.isServiceRunning.value) proactiveEngine.tick()
 
                     Result.success()
                 } catch (e: CancellationException) {

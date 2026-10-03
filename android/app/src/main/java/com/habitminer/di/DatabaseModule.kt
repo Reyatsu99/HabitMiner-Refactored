@@ -8,6 +8,8 @@ import com.habitminer.data.ContextDao
 import com.habitminer.data.DeviationDao
 import com.habitminer.data.DeviceEventDao
 import com.habitminer.data.HabitDao
+import com.habitminer.data.LabelDao
+import com.habitminer.data.PlaceDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -43,4 +45,10 @@ object DatabaseModule {
 
     @Provides
     fun provideDeviceEventDao(database: AppDatabase): DeviceEventDao = database.deviceEventDao()
+
+    @Provides
+    fun provideLabelDao(database: AppDatabase): LabelDao = database.labelDao()
+
+    @Provides
+    fun providePlaceDao(database: AppDatabase): PlaceDao = database.placeDao()
 }

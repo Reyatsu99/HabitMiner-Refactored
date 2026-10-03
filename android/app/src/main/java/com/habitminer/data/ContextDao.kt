@@ -14,6 +14,13 @@ interface ContextDao {
     @Query("SELECT * FROM context_snapshots ORDER BY timestamp DESC LIMIT 1")
     fun getLatestSnapshot(): Flow<ContextSnapshotEntity?>
 
+    /** Latest snapshot that actually has sensor readings (sensors are skipped while the screen is off). */
+    @Query("SELECT * FROM context_snapshots WHERE lightLux >= 0 OR accelVariance >= 0 ORDER BY timestamp DESC LIMIT 1")
+    fun getLatestSnapshotWithSensors(): Flow<ContextSnapshotEntity?>
+
+    @Query("SELECT COALESCE(SUM(sensingMs), 0) FROM context_snapshots WHERE timestamp >= :sinceMs")
+    fun getSensingMsSince(sinceMs: Long): Flow<Long>
+
     @Query("SELECT * FROM context_snapshots WHERE timestamp >= :startOfDayMs ORDER BY timestamp ASC")
     fun getTodaySnapshots(startOfDayMs: Long): Flow<List<ContextSnapshotEntity>>
 

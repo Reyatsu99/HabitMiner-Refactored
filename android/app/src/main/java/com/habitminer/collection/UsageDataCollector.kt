@@ -101,6 +101,23 @@ class UsageDataCollector
             return count
         }
 
+        /**
+         * Timestamps of every unlock since [sinceMs] from the system event log (API 28+).
+         * Used for pickup analysis and sleep estimation. Null when the platform can't provide it.
+         */
+        fun getUnlockTimesSince(sinceMs: Long): List<Long>? {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return null
+            val usageStatsManager = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+            val events = usageStatsManager.queryEvents(sinceMs, System.currentTimeMillis()) ?: return null
+            val event = UsageEvents.Event()
+            val times = mutableListOf<Long>()
+            while (events.hasNextEvent()) {
+                events.getNextEvent(event)
+                if (event.eventType == UsageEvents.Event.KEYGUARD_HIDDEN) times.add(event.timeStamp)
+            }
+            return times
+        }
+
         fun getDayType(dayOfWeek: Int): String {
             return if (dayOfWeek == Calendar.SATURDAY || dayOfWeek == Calendar.SUNDAY) {
                 "WEEKEND"
@@ -132,13 +149,14 @@ class UsageDataCollector
             sinceMs: Long,
             prevStoredPackage: String? = null,
             isHistorical: Boolean = false,
+            overlapMs: Long = 24 * 60 * 60 * 1000L,
         ): List<AppUsageEntity> {
             val endMs = System.currentTimeMillis()
             val usageStatsManager = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
             // Re-read a short overlap so a session already in progress at the previous
             // worker boundary has its RESUMED event available. Stable IDs below make
             // overlapping reads idempotent in Room.
-            val queryStart = (sinceMs - 24 * 60 * 60 * 1000L).coerceAtLeast(0L)
+            val queryStart = (sinceMs - overlapMs).coerceAtLeast(0L)
             val events = usageStatsManager.queryEvents(queryStart, endMs)
 
             val result = mutableListOf<AppUsageEntity>()

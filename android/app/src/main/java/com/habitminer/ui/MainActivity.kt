@@ -24,6 +24,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -39,9 +40,13 @@ import dagger.hilt.android.AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     private val viewModel: HabitViewModel by viewModels()
 
+    /** Where a notification asked us to go (check-in card or the Blueprint tab). */
+    private val pendingOpen = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         viewModel.checkPermissions()
+        handleIntent(intent)
 
         setContent {
             HabitMinerTheme {
@@ -49,6 +54,27 @@ class MainActivity : ComponentActivity() {
                 val navController = rememberNavController()
                 val navBackStackEntry by navController.currentBackStackEntryAsState()
                 val currentRoute = navBackStackEntry?.destination?.route ?: Screen.Home.route
+                var insightsTab by androidx.compose.runtime.remember { androidx.compose.runtime.mutableIntStateOf(0) }
+                val open by pendingOpen.collectAsStateWithLifecycle()
+
+                fun go(route: String) {
+                    navController.navigate(route) {
+                        popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                }
+
+                androidx.compose.runtime.LaunchedEffect(open) {
+                    when (open) {
+                        com.habitminer.proactive.Notifier.OPEN_CHECKIN -> go(Screen.Home.route)
+                        com.habitminer.proactive.Notifier.OPEN_INSIGHTS -> {
+                            insightsTab = 2
+                            go(Screen.Insights.route)
+                        }
+                    }
+                    if (open != null) pendingOpen.value = null
+                }
 
                 Scaffold(
                     bottomBar = {
@@ -183,13 +209,19 @@ class MainActivity : ComponentActivity() {
                                     )
                             }
                         ) {
-                            composable(Screen.Home.route) { HomeScreen(state, viewModel) }
+                            composable(Screen.Home.route) {
+                                HomeScreen(state, viewModel, onOpenInsights = {
+                                    insightsTab = 0
+                                    go(Screen.Insights.route)
+                                })
+                            }
                             composable(Screen.History.route) { HistoryScreen(state, viewModel) }
-                            composable(Screen.Insights.route) { InsightsScreen(state) }
+                            composable(Screen.Insights.route) { InsightsScreen(state, viewModel, initialTab = insightsTab) }
                             composable(Screen.Settings.route) {
                                 SettingsScreen(
                                     state = state,
                                     viewModel = viewModel,
+                                    onOpenToday = { go(Screen.Home.route) },
                                 )
                             }
                             composable(Screen.Health.route) {
@@ -205,5 +237,23 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         viewModel.checkPermissions()
+        viewModel.refreshInsights()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(intent: Intent?) {
+        val open = intent?.getStringExtra(com.habitminer.proactive.Notifier.EXTRA_OPEN) ?: return
+        if (open == com.habitminer.proactive.Notifier.OPEN_CHECKIN) {
+            val promptedAt = intent.getLongExtra(com.habitminer.proactive.Notifier.EXTRA_PROMPTED_AT, -1L).takeIf { it > 0 }
+            viewModel.openCheckIn(promptedAt)
+        }
+        pendingOpen.value = open
+        // Consume the extra so a configuration change doesn't reopen it.
+        intent.removeExtra(com.habitminer.proactive.Notifier.EXTRA_OPEN)
     }
 }

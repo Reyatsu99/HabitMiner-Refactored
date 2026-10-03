@@ -49,6 +49,18 @@ class MonitoringService : Service() {
     @Inject
     lateinit var usageDataCollector: UsageDataCollector
 
+    @Inject
+    lateinit var proactiveEngine: com.habitminer.proactive.ProactiveEngine
+
+    @Inject
+    lateinit var wifiPlaceProvider: WifiPlaceProvider
+
+    @Inject
+    lateinit var feedbackRepository: com.habitminer.repository.FeedbackRepository
+
+    // Battery-aware sensing: the loop interval follows the current mode (5–30 min).
+    @Volatile private var sensingMode: com.habitminer.analytics.SensingMode = com.habitminer.analytics.SensingMode.NORMAL
+
     // ACTION_USER_PRESENT is not delivered to manifest-declared receivers on Android 8+,
     // so unlocks are only captured by a receiver registered at runtime while we're alive.
     private val unlockReceiver =
@@ -88,7 +100,6 @@ class MonitoringService : Service() {
         const val ACTION_STOP = "com.habitminer.action.STOP"
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "monitoring_channel"
-        private const val INTERVAL_MS = 15 * 60 * 1000L // 15 minutes
 
         // MutableStateFlow for reactive liveness tracking
         val isServiceRunning = MutableStateFlow(false)
@@ -162,11 +173,29 @@ class MonitoringService : Service() {
 
     private fun promoteToForeground() {
         val notification = buildNotification()
+        // Wi-Fi places need the location type so the network's BSSID isn't redacted while
+        // the app is in the background. Fall back to the plain type if Android refuses it.
+        val wantsLocation = wifiPlaceProvider.isEnabled() && wifiPlaceProvider.hasPermission()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            val base = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            try {
+                startForeground(NOTIFICATION_ID, notification, if (wantsLocation) base or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else base)
+            } catch (e: Exception) {
+                android.util.Log.w("HabitMiner", "Location service type refused, continuing without places", e)
+                startForeground(NOTIFICATION_ID, notification, base)
+            }
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            @Suppress("DEPRECATION")
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_NONE)
+            try {
+                @Suppress("DEPRECATION")
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    if (wantsLocation) ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else ServiceInfo.FOREGROUND_SERVICE_TYPE_NONE,
+                )
+            } catch (e: Exception) {
+                @Suppress("DEPRECATION")
+                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_NONE)
+            }
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
@@ -181,9 +210,36 @@ class MonitoringService : Service() {
                 if (!isMonitoringPaused) {
                     collectContextSnapshot()
                 }
-                delay(INTERVAL_MS)
+                delay(sensingMode.intervalMs)
             }
         }
+
+        // Check-ins, nudges and the weekly digest are evaluated on their own 5-minute tick so
+        // a nudge isn't delayed by a 30-minute idle sensing interval.
+        serviceScope.launch {
+            delay(60_000L)
+            while (true) {
+                if (!isMonitoringPaused) {
+                    proactiveEngine.tick()
+                }
+                delay(com.habitminer.proactive.ProactiveEngine.TICK_INTERVAL_MS)
+            }
+        }
+    }
+
+    private suspend fun chooseSensingMode(
+        isScreenOn: Boolean,
+        isCharging: Boolean,
+        batteryLevel: Int,
+    ): com.habitminer.analytics.SensingMode {
+        val latest = contextRepository.getLatestSnapshotWithSensors().first()
+        val recentlyMoving =
+            latest?.takeIf { System.currentTimeMillis() - it.timestamp < 20 * 60 * 1000L }
+                ?.let { com.habitminer.analytics.ContextLabels.motion(it.accelVariance.takeIf { v -> v >= 0f }) }
+                ?.let { it != com.habitminer.analytics.Motion.STILL }
+        val mode = com.habitminer.analytics.SensingPolicy.choose(isScreenOn, recentlyMoving, isCharging, batteryLevel)
+        getSharedPreferences(PrefsKeys.PREFS_NAME, Context.MODE_PRIVATE).edit().putString(PrefsKeys.SENSING_MODE, mode.name).apply()
+        return mode
     }
 
     private suspend fun collectContextSnapshot() {
@@ -202,6 +258,7 @@ class MonitoringService : Service() {
 
         // Match DataCollectionWorker's battery guard so we don't drain battery at low charge (PERF-5)
         val shouldCollectSensors = isScreenOn && (batteryLevel >= 15 || isCharging)
+        sensingMode = chooseSensingMode(isScreenOn, isCharging, batteryLevel)
 
         // Query real unlock and notification counts from the event log (MS-2)
         val startOfDay =
@@ -226,9 +283,12 @@ class MonitoringService : Service() {
             }
 
         contextRepository.collectionMutex.withLock {
-            if (contextRepository.shouldSkipContextCollection()) {
+            // Skip if a snapshot was taken very recently (e.g. by the WorkManager fallback).
+            val minGap = (sensingMode.intervalMs - 60_000L).coerceAtLeast(4 * 60_000L)
+            if (contextRepository.shouldSkipContextCollection(minGap)) {
                 android.util.Log.d("HabitMiner", "Skipping context collection: recent snapshot exists")
             } else {
+                val place = wifiPlaceProvider.currentPlaceHash()
                 val snapshot =
                     sensorCollector.collectSnapshot(
                         unlockCount = unlockCount,
@@ -237,9 +297,11 @@ class MonitoringService : Service() {
                         collectSensors = shouldCollectSensors,
                         batteryLevel = batteryLevel,
                         isCharging = isCharging,
+                        wifiPlace = place,
                     )
 
                 contextRepository.insertSnapshot(snapshot)
+                if (place != null) feedbackRepository.recordPlaceSeen(place, snapshot.timestamp)
             }
         }
         updateRichNotificationState()

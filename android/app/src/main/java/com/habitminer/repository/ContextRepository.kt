@@ -22,12 +22,25 @@ class ContextRepository
     ) {
         val collectionMutex = Mutex()
 
-        suspend fun shouldSkipContextCollection(): Boolean {
+        /**
+         * True when a snapshot was taken less than [minGapMs] ago. The gap follows the current
+         * sensing mode (5 min when active, up to 30 min when idle).
+         */
+        suspend fun shouldSkipContextCollection(minGapMs: Long = 10 * 60 * 1000L): Boolean {
             val latest = contextDao.getLatestSnapshot().firstOrNull()
-            return latest != null && (System.currentTimeMillis() - latest.timestamp) < 10 * 60 * 1000L
+            return latest != null && (System.currentTimeMillis() - latest.timestamp) < minGapMs
         }
 
         fun getLatestSnapshot(): Flow<ContextSnapshotEntity?> = contextDao.getLatestSnapshot()
+
+        fun getLatestSnapshotWithSensors(): Flow<ContextSnapshotEntity?> = contextDao.getLatestSnapshotWithSensors()
+
+        fun getSensingMsSince(sinceMs: Long): Flow<Long> = contextDao.getSensingMsSince(sinceMs)
+
+        suspend fun getDeviceEventsSince(
+            eventType: String,
+            sinceMs: Long,
+        ): List<com.habitminer.data.DeviceEventEntity> = deviceEventDao.getSince(eventType, sinceMs)
 
         fun getTodayUsage(startOfDayMs: Long): Flow<List<AppUsageEntity>> = appUsageDao.getTodayUsage(startOfDayMs)
 

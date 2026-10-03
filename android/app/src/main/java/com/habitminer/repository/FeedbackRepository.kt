@@ -1,0 +1,122 @@
+package com.habitminer.repository
+
+import android.content.Context
+import com.habitminer.analytics.PromptKind
+import com.habitminer.analytics.SentPrompt
+import com.habitminer.data.LabelDao
+import com.habitminer.data.PlaceDao
+import com.habitminer.data.PlaceEntity
+import com.habitminer.data.PrefsKeys
+import com.habitminer.data.UserLabelEntity
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.flow.Flow
+import javax.inject.Inject
+import javax.inject.Singleton
+
+/** User-provided labels (check-ins, deviation feedback), Wi-Fi places and prompt history. */
+@Singleton
+class FeedbackRepository
+    @Inject
+    constructor(
+        @ApplicationContext private val context: Context,
+        private val labelDao: LabelDao,
+        private val placeDao: PlaceDao,
+    ) {
+        private val prefs get() = context.getSharedPreferences(PrefsKeys.PREFS_NAME, Context.MODE_PRIVATE)
+
+        // ---- Labels -----------------------------------------------------------------------
+
+        fun getAllLabels(): Flow<List<UserLabelEntity>> = labelDao.getAll()
+
+        fun getDeviationFeedback(): Flow<List<UserLabelEntity>> = labelDao.getByKind(UserLabelEntity.KIND_DEVIATION_FEEDBACK)
+
+        fun getCheckIns(): Flow<List<UserLabelEntity>> = labelDao.getByKind(UserLabelEntity.KIND_CHECK_IN)
+
+        suspend fun saveCheckIn(
+            value: String,
+            promptedAt: Long?,
+            contextJson: String?,
+        ) {
+            labelDao.insert(
+                UserLabelEntity(
+                    timestamp = System.currentTimeMillis(),
+                    kind = UserLabelEntity.KIND_CHECK_IN,
+                    value = value,
+                    promptedAt = promptedAt,
+                    contextJson = contextJson,
+                ),
+            )
+        }
+
+        /** One answer per deviation: a new answer replaces the previous one. */
+        suspend fun saveDeviationFeedback(
+            fingerprint: String,
+            value: String,
+            contextJson: String?,
+        ) {
+            labelDao.deleteByRef(UserLabelEntity.KIND_DEVIATION_FEEDBACK, fingerprint)
+            labelDao.insert(
+                UserLabelEntity(
+                    timestamp = System.currentTimeMillis(),
+                    kind = UserLabelEntity.KIND_DEVIATION_FEEDBACK,
+                    value = value,
+                    refKey = fingerprint,
+                    contextJson = contextJson,
+                ),
+            )
+        }
+
+        // ---- Places -----------------------------------------------------------------------
+
+        fun getPlaces(): Flow<List<PlaceEntity>> = placeDao.getAll()
+
+        suspend fun recordPlaceSeen(
+            placeHash: String,
+            time: Long,
+        ) {
+            placeDao.insertIgnore(PlaceEntity(placeHash = placeHash, firstSeen = time, lastSeen = time))
+            placeDao.touch(placeHash, time)
+        }
+
+        suspend fun renamePlace(
+            placeHash: String,
+            label: String?,
+        ) = placeDao.rename(placeHash, label?.trim()?.takeIf { it.isNotEmpty() })
+
+        // ---- Prompt history (kept in preferences, last 3 days) ----------------------------
+
+        @Synchronized
+        fun sentPrompts(): List<SentPrompt> =
+            prefs.getString(PrefsKeys.SENT_PROMPTS, "").orEmpty()
+                .split(';')
+                .mapNotNull { entry ->
+                    val parts = entry.split(':')
+                    if (parts.size != 2) return@mapNotNull null
+                    val kind = runCatching { PromptKind.valueOf(parts[0]) }.getOrNull() ?: return@mapNotNull null
+                    val time = parts[1].toLongOrNull() ?: return@mapNotNull null
+                    SentPrompt(kind, time)
+                }
+
+        @Synchronized
+        fun recordPromptSent(
+            kind: PromptKind,
+            time: Long,
+        ) {
+            val cutoff = time - 3L * 24 * 60 * 60 * 1000
+            val kept = sentPrompts().filter { it.time >= cutoff } + SentPrompt(kind, time)
+            prefs.edit().putString(PrefsKeys.SENT_PROMPTS, kept.joinToString(";") { "${it.kind}:${it.time}" }).apply()
+            if (kind == PromptKind.DIGEST) prefs.edit().putLong(PrefsKeys.LAST_DIGEST_AT, time).apply()
+        }
+
+        fun lastDigestAt(): Long? = prefs.getLong(PrefsKeys.LAST_DIGEST_AT, -1L).takeIf { it > 0 }
+
+        // ---- Housekeeping ------------------------------------------------------------------
+
+        suspend fun clearOldData(cutoffMs: Long) = labelDao.deleteOlderThan(cutoffMs)
+
+        suspend fun clearAll() {
+            labelDao.deleteAll()
+            placeDao.deleteAll()
+            prefs.edit().remove(PrefsKeys.SENT_PROMPTS).remove(PrefsKeys.LAST_DIGEST_AT).apply()
+        }
+    }

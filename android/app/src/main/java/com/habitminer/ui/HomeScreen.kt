@@ -6,6 +6,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,56 +18,83 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.Bedtime
+import androidx.compose.material.icons.filled.Insights
+import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.QuestionAnswer
+import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.Sensors
+import androidx.compose.material.icons.filled.TrendingUp
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.habitminer.data.ContextSnapshotEntity
+import com.habitminer.analytics.CheckInOption
+import com.habitminer.analytics.ContextInsight
+import com.habitminer.analytics.Format
+import com.habitminer.analytics.InsightKind
+import com.habitminer.analytics.PatternGroup
+import com.habitminer.analytics.PickupStats
+import com.habitminer.analytics.SleepEstimate
+import com.habitminer.analytics.SleepSummary
+import com.habitminer.data.DeviationEntity
+import com.habitminer.data.UserLabelEntity
+import com.habitminer.engine.AnalyticsMappers
 import com.habitminer.engine.HabitUiState
 import com.habitminer.engine.HabitViewModel
 import com.habitminer.engine.TypicalUsageCalculator
-import com.habitminer.ui.components.HabitCard
-import com.habitminer.ui.components.DeviationCard
-import com.habitminer.ui.components.TopAppMiniChart
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.AssistChipDefaults
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
+import com.habitminer.ui.components.BodyText
+import com.habitminer.ui.components.CardHeader
+import com.habitminer.ui.components.Hint
+import com.habitminer.ui.components.Pill
+import com.habitminer.ui.components.SectionTitle
+import com.habitminer.ui.components.StatBlock
+import com.habitminer.ui.components.SurfaceCard
+import com.habitminer.ui.components.TypicalDayChart
+import com.habitminer.ui.components.UsageBars
+import com.habitminer.ui.components.categoryColor
 import com.habitminer.ui.theme.StatusSuccess
 import com.habitminer.ui.theme.StatusWarning
-import com.habitminer.ui.theme.StatusError
 
 @Composable
 fun HomeScreen(
     state: HabitUiState,
     viewModel: HabitViewModel,
+    onOpenInsights: () -> Unit = {},
 ) {
     val scrollState = rememberScrollState()
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     Column(
         modifier =
             Modifier
                 .fillMaxSize()
                 .verticalScroll(scrollState)
-                .padding(horizontal = 20.dp, vertical = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(24.dp),
+                .padding(horizontal = 16.dp, vertical = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        val context = androidx.compose.ui.platform.LocalContext.current
-        
         if (!state.hasUsagePermission || !state.hasRuntimePermissions || !state.hasNotificationPermission) {
             PermissionScreen(
                 hasUsage = state.hasUsagePermission,
@@ -74,9 +103,7 @@ fun HomeScreen(
                 onRequestUsage = {
                     context.startActivity(android.content.Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS))
                 },
-                onRuntimePermissionsGranted = {
-                    viewModel.checkPermissions()
-                },
+                onRuntimePermissionsGranted = { viewModel.checkPermissions() },
                 onRequestNotification = {
                     context.startActivity(android.content.Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
                 },
@@ -84,84 +111,36 @@ fun HomeScreen(
             return@Column
         }
 
-        // First Run Experience
         if (state.daysOfData == 0 && state.todayScreenTimeMs == 0L && state.discoveredHabits.isEmpty()) {
             FirstRunExperience(state, viewModel)
             return@Column
         }
 
-        // Header and Learning Status
         LearningStatusHeader(state)
 
-        // Today's Usage Section
-        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text(
-                text = "Today's behavior",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onBackground,
-            )
-            TodayUsageCard(state)
+        if (state.pendingCheckInPromptedAt != null) {
+            CheckInCard(onAnswer = viewModel::answerCheckIn, onDismiss = viewModel::dismissCheckIn)
         }
 
-        // Patterns & Deviations Section
-        val hasDeviations = state.overallDeviationScore > 0.4f && state.todayDeviations.isNotEmpty()
-        val hasPredictions = state.predictions.isNotEmpty()
+        TodayUsageCard(state)
 
-        if (state.discoveredHabits.isNotEmpty() || hasDeviations) {
-            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text(
-                    text = "Patterns & deviations",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onBackground,
-                )
+        val insights = state.insights
+        insights?.lastNight?.let { SleepCard(it, insights.sleepSummary) }
 
-                if (hasDeviations) {
-                    val dev = state.todayDeviations.maxByOrNull { it.normalizedScore }
-                    if (dev != null) {
-                        DeviationCard(
-                            dev = dev,
-                            onAcknowledge = { viewModel.acknowledgeDeviation(dev.id) }
-                        )
-                    }
-                }
+        PickupsCard(state.todayUnlocks, insights?.pickupsToday)
 
-                state.discoveredHabits.take(2).forEach { habit ->
-                    HabitCard(habit = habit)
-                }
-            }
+        TodayDeviationCard(state, viewModel)
+
+        insights?.contextInsights?.take(2)?.forEach { ContextInsightCard(it) }
+
+        insights?.patternGroups?.takeIf { it.isNotEmpty() }?.let { groups ->
+            PatternsPreview(groups, onOpenInsights)
         }
 
-        // Context Section
-        state.latestContext?.let { ctx ->
-            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text(
-                    text = "Context",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onBackground,
-                )
-                CompactContextBanner(
-                    context = ctx,
-                    hasNotificationPermission = state.hasNotificationPermission,
-                )
-            }
-        }
+        ContextNowCard(state)
 
-        // Lower-priority predictions
-        if (hasPredictions) {
-            val top = state.predictions.first()
-            ActionableInsightCard(
-                title = "Next Likely Activity [Experimental]",
-                description = "Based on your routine → ${top.appName} (${(top.confidence * 100).toInt()}%)",
-                icon = Icons.Default.AutoAwesome,
-                isCritical = false,
-                accentColor = MaterialTheme.colorScheme.primary,
-            )
-        }
+        LikelyNextCard(state)
 
-        // Sync Status
         if (state.isSyncing) {
             Text(
                 text = "Syncing your on-device data…",
@@ -170,10 +149,13 @@ fun HomeScreen(
                 modifier = Modifier.align(Alignment.CenterHorizontally),
             )
         }
-
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(16.dp))
     }
 }
+
+// ---------------------------------------------------------------------------------------
+// Header and first run
+// ---------------------------------------------------------------------------------------
 
 @Composable
 fun FirstRunExperience(
@@ -183,7 +165,7 @@ fun FirstRunExperience(
     Column(
         modifier = Modifier.fillMaxWidth().padding(top = 32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(24.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
         Text(
             text = "Welcome to HabitMiner",
@@ -191,138 +173,125 @@ fun FirstRunExperience(
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onBackground,
         )
-
         Text(
-            text = "I'm learning how your phone usage\nchanges throughout the day.",
+            text = "HabitMiner learns how your phone use changes through the day, using only data that stays on this phone.",
             style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.75f),
+            textAlign = TextAlign.Center,
         )
-
         Box(
-            modifier =
-                Modifier
-                    .size(64.dp)
-                    .background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
+            modifier = Modifier.size(64.dp).background(MaterialTheme.colorScheme.primaryContainer, CircleShape),
             contentAlignment = Alignment.Center,
         ) {
             Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
         }
-
         Text(
-            text = "No patterns yet",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onBackground,
-        )
-
-        Text(
-            text = "Keep using your phone normally.\nYour personal baseline will appear\nas enough data is collected.",
+            text = "Keep using your phone normally. Your first insights appear after a day, and they get better over a week.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            textAlign = TextAlign.Center,
         )
-
         if (state.isSyncing) {
-            Text("Syncing data...", color = MaterialTheme.colorScheme.primary)
+            Text("Syncing data…", color = MaterialTheme.colorScheme.primary)
         } else {
-            Button(onClick = { viewModel.loadHistoricalData() }) {
-                Text("Sync Usage Now")
-            }
+            Button(onClick = { viewModel.loadHistoricalData() }) { Text("Sync usage now") }
         }
     }
 }
 
 @Composable
 fun LearningStatusHeader(state: HabitUiState) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier =
-                        Modifier
-                            .size(8.dp)
-                            .background(Color(0xFF10B981), CircleShape),
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = "Monitoring",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onBackground,
-                )
-            }
-
-            val statusText =
-                when {
-                    state.discoveredHabits.isNotEmpty() -> "${state.discoveredHabits.size} patterns learned"
-                    state.hasEnoughData -> "Your baseline is established"
-                    else -> "Learning your routine · Day ${state.daysOfData}"
-                }
-
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(modifier = Modifier.size(8.dp).background(Color(0xFF10B981), CircleShape))
+            Spacer(modifier = Modifier.width(6.dp))
             Text(
-                text = statusText,
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
+                text = if (state.isMonitoringServiceActive) "Monitoring" else "Monitoring (background sync)",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onBackground,
             )
         }
+        val days = state.daysOfData
+        Text(
+            text =
+                when {
+                    days >= 7 -> "Today"
+                    days > 0 -> "Today · learning your routine (day $days of 7)"
+                    else -> "Today"
+                },
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onBackground,
+        )
     }
 }
 
+// ---------------------------------------------------------------------------------------
+// Check-in
+// ---------------------------------------------------------------------------------------
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun CheckInCard(
+    onAnswer: (CheckInOption) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    SurfaceCard {
+        CardHeader("Quick check-in", Icons.Default.QuestionAnswer)
+        Spacer(modifier = Modifier.height(8.dp))
+        BodyText("What are you doing right now? Your answer helps HabitMiner check its guesses. It stays on this phone.")
+        Spacer(modifier = Modifier.height(12.dp))
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            CheckInOption.entries.forEach { option ->
+                AssistChip(onClick = { onAnswer(option) }, label = { Text("${option.emoji}  ${option.label}") })
+            }
+        }
+        TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) { Text("Skip") }
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// Today's usage
+// ---------------------------------------------------------------------------------------
+
 @Composable
 fun TodayUsageCard(state: HabitUiState) {
-    val screenTimeMs = state.todayScreenTimeMs
+    var mode by remember { mutableIntStateOf(0) } // 0 = apps, 1 = categories
+    SurfaceCard {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            StatBlock("Screen time", Format.duration(state.todayScreenTimeMs), large = true)
+            StatBlock("Unlocks", "${state.todayUnlocks}", large = true, alignEnd = true)
+        }
+        Spacer(modifier = Modifier.height(14.dp))
+        TypicalComparison(screenTimeMs = state.todayScreenTimeMs, typical = state.typicalUsage)
 
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        shape = RoundedCornerShape(24.dp),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(modifier = Modifier.padding(20.dp)) {
-            // Neutral Baseline Presentation
-            val hours = screenTimeMs / (1000 * 60 * 60)
-            val mins = (screenTimeMs / (1000 * 60)) % 60
+        state.insights?.typicalDay?.let { curve ->
+            Spacer(modifier = Modifier.height(14.dp))
+            TypicalDayChart(curve)
+        }
 
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Column {
-                    Text(
-                        text = "Screen time",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                    )
-                    Text(
-                        text = "${hours}h ${mins}m",
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                }
-                
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(
-                        text = "Unlocks",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                    )
-                    Text(
-                        text = "${state.todayUnlocks}",
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                }
+        Spacer(modifier = Modifier.height(16.dp))
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            listOf("Apps", "Categories").forEachIndexed { index, label ->
+                SegmentedButton(
+                    selected = mode == index,
+                    onClick = { mode = index },
+                    shape = SegmentedButtonDefaults.itemShape(index = index, count = 2),
+                ) { Text(label) }
             }
-
-            Spacer(modifier = Modifier.height(16.dp))
-            TypicalComparison(screenTimeMs = screenTimeMs, typical = state.typicalUsage)
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // Top App Mini Chart
-            TopAppMiniChart(appUsages = state.todayUsageByApp)
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+        if (mode == 0) {
+            val categoryByApp = remember(state.todayAppUsage) { state.todayAppUsage.associate { it.appName to Labels.category(it) } }
+            val items =
+                state.todayUsageByApp.entries.sortedByDescending { it.value }.map { (app, ms) ->
+                    Triple(app, ms, categoryByApp[app]?.let { categoryColor(it) } ?: MaterialTheme.colorScheme.primary)
+                }
+            UsageBars(items)
+        } else {
+            val items = state.insights?.todayByCategory.orEmpty().map { (cat, ms) -> Triple(cat.label, ms, categoryColor(cat)) }
+            if (items.isEmpty()) Hint("Categories appear after the first analysis (within a minute).") else UsageBars(items, maxRows = 6)
         }
     }
 }
@@ -332,197 +301,254 @@ private fun TypicalComparison(
     screenTimeMs: Long,
     typical: TypicalUsageCalculator.TypicalUsage?,
 ) {
-    val labelColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-
     if (typical == null) {
-        Text(
-            text = "Typical by now",
-            style = MaterialTheme.typography.labelMedium,
-            color = labelColor,
-        )
-        Text(
-            text = "Needs one full day of history",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
+        StatBlock("Usual by now", "Needs one full day of history")
         return
     }
-
     val expected = typical.expectedByNowMs
     val diffMs = screenTimeMs - expected
-    // Within ±10% (or ±10 min) of typical counts as "about usual".
     val tolerance = maxOf(expected / 10, 10 * 60_000L)
     val (diffText, diffColor) =
         when {
-            diffMs > tolerance -> "+${formatDurationShort(diffMs)} more" to StatusError
-            diffMs < -tolerance -> "${formatDurationShort(-diffMs)} less" to StatusSuccess
+            diffMs > tolerance -> "${Format.duration(diffMs)} more" to StatusWarning
+            diffMs < -tolerance -> "${Format.duration(-diffMs)} less" to StatusSuccess
             else -> "About usual" to MaterialTheme.colorScheme.onSurface
         }
-
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Column {
-            Text(
-                text = "Typical by now",
-                style = MaterialTheme.typography.labelMedium,
-                color = labelColor,
-            )
-            Text(
-                text = formatDurationShort(expected),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-        }
-        Column(horizontalAlignment = Alignment.End) {
-            Text(
-                text = "Difference",
-                style = MaterialTheme.typography.labelMedium,
-                color = labelColor,
-            )
-            Text(
-                text = diffText,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = diffColor,
-            )
-        }
+        StatBlock("Usual by now", Format.duration(expected))
+        StatBlock("Compared with usual", diffText, valueColor = diffColor, alignEnd = true)
     }
-
     val dayWord = if (typical.daysUsed == 1) "day" else "days"
-    val basisText =
+    val basis =
         when (typical.basis) {
-            TypicalUsageCalculator.Basis.SAME_DAY_TYPE ->
-                "${typical.daysUsed} ${typical.dayType.lowercase()} $dayWord"
-            TypicalUsageCalculator.Basis.ALL_DAYS ->
-                "last ${typical.daysUsed} $dayWord (not enough ${typical.dayType.lowercase()}s yet)"
+            TypicalUsageCalculator.Basis.SAME_DAY_TYPE -> "your last ${typical.daysUsed} ${typical.dayType.lowercase()} $dayWord"
+            TypicalUsageCalculator.Basis.ALL_DAYS -> "your last ${typical.daysUsed} $dayWord"
         }
-    Spacer(modifier = Modifier.height(6.dp))
-    Text(
-        text = "Usually ${formatDurationShort(typical.expectedFullDayMs)} by end of day · based on $basisText",
-        style = MaterialTheme.typography.bodySmall,
-        color = labelColor,
-    )
+    Spacer(modifier = Modifier.height(4.dp))
+    Hint("Usually ${Format.duration(typical.expectedFullDayMs)} by the end of the day, based on $basis.")
 }
 
-private fun formatDurationShort(ms: Long): String {
-    val totalMinutes = (ms / 60_000L).coerceAtLeast(0L)
-    val h = totalMinutes / 60
-    val m = totalMinutes % 60
-    return when {
-        h == 0L -> "${m}m"
-        m == 0L -> "${h}h"
-        else -> "${h}h ${m}m"
+// ---------------------------------------------------------------------------------------
+// Sleep, pickups, deviations, insights
+// ---------------------------------------------------------------------------------------
+
+@Composable
+fun SleepCard(
+    night: SleepEstimate,
+    summary: SleepSummary?,
+) {
+    val zone = java.time.ZoneId.systemDefault()
+    SurfaceCard {
+        CardHeader("Last night", Icons.Default.Bedtime, tint = Color(0xFF7986CB), trailing = "${night.confidence.label} confidence")
+        Spacer(modifier = Modifier.height(10.dp))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            StatBlock("Asleep (est.)", "${Format.clock(night.sleepStart, zone)} → ${Format.clock(night.wakeTime, zone)}")
+            StatBlock("Duration", Format.duration(night.durationMs), alignEnd = true)
+        }
+        Spacer(modifier = Modifier.height(10.dp))
+        if (night.preSleepUseMs > 0) {
+            val dark = night.preSleepDarkShare?.let { ", ${Format.percent(it)} of it in the dark" } ?: ""
+            BodyText("Phone use in the hour before sleep: ${Format.duration(night.preSleepUseMs)}$dark.")
+        }
+        val apps =
+            listOfNotNull(
+                night.lastAppBeforeSleep?.let { "Last app: $it" },
+                night.firstAppAfterWake?.let { "first app after waking: $it" },
+            ).joinToString(" · ")
+        if (apps.isNotEmpty()) BodyText(apps.replaceFirstChar { it.uppercase() })
+        summary?.takeIf { it.nights >= 2 }?.let {
+            Spacer(modifier = Modifier.height(6.dp))
+            Hint(
+                "${it.nights}-night average: ${Format.duration(it.avgDurationMs)}, usually asleep around " +
+                    "${Format.clockFromMinutes(it.avgBedtimeMinutes)} and up around ${Format.clockFromMinutes(it.avgWakeMinutes)}.",
+            )
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Hint("Estimated from when your screen was off overnight, plus charging and darkness.")
     }
 }
+
+@Composable
+fun PickupsCard(
+    unlocks: Int,
+    stats: PickupStats?,
+) {
+    if (unlocks == 0 && (stats == null || stats.total == 0)) return
+    SurfaceCard {
+        CardHeader("What makes you pick up your phone", Icons.Default.Notifications, tint = Color(0xFFFFB74D))
+        Spacer(modifier = Modifier.height(10.dp))
+        if (stats == null || stats.total == 0) {
+            BodyText("$unlocks unlocks today. A breakdown appears after the next analysis.")
+            return@SurfaceCard
+        }
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            StatBlock("After a notification", Format.percent(stats.notificationShare), caption = "${stats.afterNotification} of ${stats.total}")
+            StatBlock("On your own", "${stats.selfInitiated}", alignEnd = true, caption = "${stats.quickChecks} quick checks (<30s)")
+        }
+        stats.topTriggers.firstOrNull()?.let {
+            Spacer(modifier = Modifier.height(8.dp))
+            BodyText("Most pickups after a notification came from ${it.appName} (${it.count}).")
+        }
+        stats.topFirstApps.firstOrNull()?.let {
+            BodyText("The app you open first most often: ${it.appName}.")
+        }
+    }
+}
+
+@Composable
+fun TodayDeviationCard(
+    state: HabitUiState,
+    viewModel: HabitViewModel,
+) {
+    val candidates =
+        state.todayDeviations.filter { state.deviationFeedback[AnalyticsMappers.fingerprint(it)] != UserLabelEntity.FEEDBACK_EXPECTED }
+    val dev = candidates.maxByOrNull { it.normalizedScore } ?: return
+    DeviationCard(dev, state.deviationFeedback[AnalyticsMappers.fingerprint(dev)]) { value -> viewModel.giveDeviationFeedback(dev, value) }
+}
+
+/** A deviation with plain wording and Expected / Unusual buttons. */
+@Composable
+fun DeviationCard(
+    dev: DeviationEntity,
+    feedback: String?,
+    onFeedback: (String) -> Unit,
+) {
+    SurfaceCard {
+        CardHeader(Labels.deviationTitle(dev.deviationType), Icons.Default.TrendingUp, tint = StatusWarning, trailing = Labels.dayTime(dev.timestamp))
+        Spacer(modifier = Modifier.height(8.dp))
+        BodyText(dev.description)
+        Spacer(modifier = Modifier.height(10.dp))
+        when (feedback) {
+            UserLabelEntity.FEEDBACK_EXPECTED -> Hint("You marked this as expected. Thanks, this helps tune what counts as unusual.")
+            UserLabelEntity.FEEDBACK_UNUSUAL -> Hint("You marked this as unusual. Thanks for confirming.")
+            else -> {
+                Hint("Was this expected?")
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { onFeedback(UserLabelEntity.FEEDBACK_EXPECTED) }) { Text("Expected") }
+                    OutlinedButton(onClick = { onFeedback(UserLabelEntity.FEEDBACK_UNUSUAL) }) { Text("Unusual") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ContextInsightCard(insight: ContextInsight) {
+    val tint =
+        when (insight.kind) {
+            InsightKind.DARK -> Color(0xFF7986CB)
+            InsightKind.MOVING -> Color(0xFF66BB6A)
+            InsightKind.CHARGING -> Color(0xFF26C6DA)
+            InsightKind.LATE_NIGHT -> Color(0xFFBA68C8)
+            InsightKind.PLACE -> Color(0xFFFFB74D)
+        }
+    SurfaceCard {
+        CardHeader(insight.headline, Icons.Default.Lightbulb, tint = tint)
+        Spacer(modifier = Modifier.height(6.dp))
+        Hint(insight.detail)
+    }
+}
+
+@Composable
+fun PatternsPreview(
+    groups: List<PatternGroup>,
+    onOpenInsights: () -> Unit,
+) {
+    SurfaceCard {
+        CardHeader("Your routines", Icons.Default.Repeat, trailing = "${groups.size} found")
+        Spacer(modifier = Modifier.height(8.dp))
+        groups.take(3).forEach { g ->
+            PatternRowView(g)
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+        TextButton(onClick = onOpenInsights, modifier = Modifier.align(Alignment.End)) { Text("See all routines") }
+    }
+}
+
+@Composable
+fun PatternRowView(g: PatternGroup) {
+    Column {
+        Text(
+            text = g.sequence,
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Hint("${g.whenText} · ${g.evidenceText}")
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// Context now and next app
+// ---------------------------------------------------------------------------------------
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun CompactContextBanner(
-    context: ContextSnapshotEntity,
-    hasNotificationPermission: Boolean,
-) {
-    val motion =
-        if (context.accelVariance < 0f) {
-            "❔ Unknown"
-        } else if (context.accelVariance < 0.5f) {
-            "🧍 Low activity"
-        } else if (context.accelVariance < 2.0f) {
-            "🚶 Moderate"
-        } else {
-            "🏃 High activity"
+fun ContextNowCard(state: HabitUiState) {
+    val sensors = state.latestSensorContext
+    val latest = state.latestContext
+    SurfaceCard {
+        CardHeader("Around you", Icons.Default.Sensors, trailing = sensors?.let { "sensors ${Labels.age(it.timestamp)}" })
+        Spacer(modifier = Modifier.height(10.dp))
+        if (sensors == null && latest == null) {
+            Hint("No readings yet. Sensors are read every 5–30 minutes while the screen is on.")
+            return@SurfaceCard
         }
-    val light =
-        if (context.lightLux < 0) {
-            "❔ Unavailable"
-        } else if (context.lightLux > 100) {
-            "☀️ Bright"
-        } else if (context.lightLux > 10) {
-            "🌙 Dim"
-        } else {
-            "🌑 Dark"
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            sensors?.let { s ->
+                if (s.lightLux >= 0f) {
+                    val light =
+                        when {
+                            s.lightLux <= 10f -> "🌑 Dark"
+                            s.lightLux <= 100f -> "🌙 Dim"
+                            else -> "☀️ Bright"
+                        }
+                    ContextChip(light)
+                }
+                if (s.accelVariance >= 0f) {
+                    ContextChip(
+                        when {
+                            s.accelVariance < 0.5f -> "🧍 Still"
+                            s.accelVariance < 2f -> "🚶 Moving"
+                            else -> "🏃 Very active"
+                        },
+                    )
+                }
+                s.proximityNear?.let { ContextChip(if (it) "📱 Covered / in pocket" else "📱 In hand or on a surface") }
+                if (s.stepsSinceLastSnapshot > 0) ContextChip("👣 ${s.stepsSinceLastSnapshot} steps")
+            }
+            latest?.let { l ->
+                if (l.batteryLevel in 0..100) ContextChip("🔋 ${l.batteryLevel}%" + if (l.isCharging) " · charging" else "")
+                l.wifiPlace?.let { hash -> state.insights?.placeNames?.get(hash)?.let { ContextChip("📍 $it") } }
+            }
         }
-    val batteryText = if (context.batteryLevel < 0) "Unavailable" else "🔋 ${context.batteryLevel}%"
-    val steps = if (context.stepsSinceLastSnapshot > 0) "👣 ${context.stepsSinceLastSnapshot} steps" else "👣 --"
-    val proximity =
-        if (context.proximityNear == true) {
-            "📱 Near"
-        } else if (context.proximityNear == false) {
-            "📱 Far"
-        } else {
-            "📱 --"
+        if (sensors == null) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Hint("Light and motion are only read while the screen is on, so they appear after you next use your phone.")
         }
-
-    FlowRow(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        AssistChip(
-            onClick = {},
-            label = { Text(motion) }
-        )
-        AssistChip(
-            onClick = {},
-            label = { Text(light) }
-        )
-        AssistChip(
-            onClick = {},
-            label = { Text(batteryText) }
-        )
-        AssistChip(
-            onClick = {},
-            label = { Text(steps) }
-        )
-        AssistChip(
-            onClick = {},
-            label = { Text(proximity) }
-        )
     }
 }
 
 @Composable
-fun ActionableInsightCard(
-    title: String,
-    description: String,
-    icon: ImageVector,
-    isCritical: Boolean,
-    accentColor: Color = if (isCritical) MaterialTheme.colorScheme.error else Color(0xFFF59E0B),
-) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        shape = RoundedCornerShape(16.dp),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                modifier =
-                    Modifier
-                        .size(40.dp)
-                        .background(accentColor.copy(alpha = 0.2f), CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = accentColor,
-                    modifier = Modifier.size(20.dp),
-                )
-            }
-            Spacer(modifier = Modifier.width(16.dp))
-            Column {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = description,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                )
+private fun ContextChip(text: String) {
+    FilterChip(selected = false, onClick = {}, label = { Text(text) })
+}
+
+@Composable
+fun LikelyNextCard(state: HabitUiState) {
+    val predictions = state.predictions.filter { it.confidence >= 0.12f }
+    if (predictions.isEmpty() || predictions.first().confidence < 0.2f) return
+    SurfaceCard {
+        CardHeader("Likely next app", Icons.Default.Insights)
+        Spacer(modifier = Modifier.height(8.dp))
+        predictions.take(3).forEach { p ->
+            Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                BodyText(p.appName)
+                Pill(Format.percent(p.confidence))
             }
         }
+        Spacer(modifier = Modifier.height(4.dp))
+        Hint("A guess from what you usually open next at this time of day.")
     }
 }
