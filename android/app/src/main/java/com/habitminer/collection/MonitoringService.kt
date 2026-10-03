@@ -5,7 +5,9 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.IntentFilter
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.BatteryManager
@@ -13,6 +15,7 @@ import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.flow.MutableStateFlow
 import com.habitminer.data.PrefsKeys
 import com.habitminer.domain.AppIdentityResolver
@@ -42,6 +45,27 @@ class MonitoringService : Service() {
 
     @Inject
     lateinit var appIdentityResolver: AppIdentityResolver
+
+    @Inject
+    lateinit var usageDataCollector: UsageDataCollector
+
+    // ACTION_USER_PRESENT is not delivered to manifest-declared receivers on Android 8+,
+    // so unlocks are only captured by a receiver registered at runtime while we're alive.
+    private val unlockReceiver =
+        object : BroadcastReceiver() {
+            override fun onReceive(
+                context: Context,
+                intent: Intent,
+            ) {
+                if (intent.action != Intent.ACTION_USER_PRESENT) return
+                serviceScope.launch {
+                    contextRepository.insertDeviceEvent(
+                        com.habitminer.data.DeviceEventEntity(eventType = DeviceEventReceiver.EVENT_UNLOCK),
+                    )
+                }
+            }
+        }
+    private var unlockReceiverRegistered = false
 
     private val serviceJob = Job()
     private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob)
@@ -74,6 +98,18 @@ class MonitoringService : Service() {
         super.onCreate()
         createNotificationChannel()
         isServiceRunning.value = true
+
+        try {
+            ContextCompat.registerReceiver(
+                this,
+                unlockReceiver,
+                IntentFilter(Intent.ACTION_USER_PRESENT),
+                ContextCompat.RECEIVER_NOT_EXPORTED,
+            )
+            unlockReceiverRegistered = true
+        } catch (e: Exception) {
+            android.util.Log.w("HabitMiner", "Could not register unlock receiver", e)
+        }
 
         // Initial population of the rich notification state to avoid "0m today" delay
         serviceScope.launch {
@@ -176,7 +212,9 @@ class MonitoringService : Service() {
                 set(Calendar.MILLISECOND, 0)
                 timeInMillis
             }
-        val unlockCount = contextRepository.countDeviceEventsSince(com.habitminer.collection.DeviceEventReceiver.EVENT_UNLOCK, startOfDay)
+        val recordedUnlocks = contextRepository.countDeviceEventsSince(com.habitminer.collection.DeviceEventReceiver.EVENT_UNLOCK, startOfDay)
+        val systemUnlocks = runCatching { usageDataCollector.countUnlocksSince(startOfDay) }.getOrNull() ?: 0
+        val unlockCount = maxOf(recordedUnlocks, systemUnlocks)
         val notificationsLastHour =
             if (HabitNotificationListener.isEnabled(this)) {
                 contextRepository.countDeviceEventsSince(
@@ -363,6 +401,10 @@ class MonitoringService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         isServiceRunning.value = false
+        if (unlockReceiverRegistered) {
+            runCatching { unregisterReceiver(unlockReceiver) }
+            unlockReceiverRegistered = false
+        }
         // DO NOT call sensorCollector.shutdown() here. It's a @Singleton so its HandlerThread
         // must outlive this service lifecycle to support DataCollectionWorker and future restarts.
         serviceScope.cancel()

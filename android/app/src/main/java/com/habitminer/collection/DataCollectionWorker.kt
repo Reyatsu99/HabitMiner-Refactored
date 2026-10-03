@@ -69,7 +69,9 @@ class DataCollectionWorker
                             set(Calendar.MILLISECOND, 0)
                             timeInMillis
                         }
-                    val unlockCount = contextRepository.countDeviceEventsSince(com.habitminer.collection.DeviceEventReceiver.EVENT_UNLOCK, startOfDay)
+                    val recordedUnlocks = contextRepository.countDeviceEventsSince(com.habitminer.collection.DeviceEventReceiver.EVENT_UNLOCK, startOfDay)
+                    val systemUnlocks = runCatching { usageCollector.countUnlocksSince(startOfDay) }.getOrNull() ?: 0
+                    val unlockCount = maxOf(recordedUnlocks, systemUnlocks)
                     val notificationsLastHour =
                         if (com.habitminer.collection.HabitNotificationListener.isEnabled(appContext)) {
                             contextRepository.countDeviceEventsSince(com.habitminer.collection.DeviceEventReceiver.EVENT_NOTIFICATION, now - TimeUnit.HOURS.toMillis(1))
