@@ -135,6 +135,7 @@ class HabitViewModel
         private val insightsComputer: InsightsComputer,
         private val wifiPlaceProvider: com.habitminer.collection.WifiPlaceProvider,
         private val labelContextCapture: com.habitminer.proactive.LabelContextCapture,
+        private val importManager: com.habitminer.data.ImportManager,
     ) : AndroidViewModel(application), HabitActions {
         private val _uiState = MutableStateFlow(HabitUiState(selectedHistoryDate = getStartOfDay()))
         val uiState: StateFlow<HabitUiState> = _uiState.asStateFlow()
@@ -334,6 +335,32 @@ class HabitViewModel
                 } else {
                     _uiState.update { it.copy(exportMessage = "Export failed. Please try again.") }
                 }
+            }
+        }
+
+        /**
+         * Restores a ZIP from Export (e.g. after reinstalling). Afterwards the usual sync runs,
+         * which rebuilds routines and baselines from the restored history.
+         */
+        fun importData(uri: android.net.Uri) {
+            viewModelScope.launch(Dispatchers.IO) {
+                _uiState.update { it.copy(exportMessage = "Importing your data…") }
+                val message =
+                    try {
+                        val r = importManager.importZip(uri)
+                        if (r.isEmpty) {
+                            "That file doesn't look like a HabitMiner export. Pick the .zip made by Export Data."
+                        } else {
+                            "Imported ${r.usage} app sessions, ${r.snapshots} surroundings readings, " +
+                                "${r.labels} labels and ${r.places} places. Rebuilding your routines…"
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.e("HabitMiner", "Import failed", e)
+                        "Import failed: ${e.message ?: "unreadable file"}"
+                    }
+                _uiState.update { it.copy(exportMessage = message) }
+                loadHistoricalData()
+                insightsRefresh.tryEmit(Unit)
             }
         }
 

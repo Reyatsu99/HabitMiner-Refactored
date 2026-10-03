@@ -198,6 +198,10 @@ cd android
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
+**Shared debug key.** Debug builds are signed with `android/app/debug.keystore` (debug-only, not secret), so an APK built by CI or by any teammate installs over an existing one and keeps its data. CI publishes the latest debug APK on every push (Actions → Artifacts).
+
+**Moving data or switching from an older build.** If Android says *"package conflicts with an existing package"*, the installed app was signed with a different key. Open the old app → Settings → **Export Data Now**, uninstall it, install the new APK, then Settings → **Import a previous export** and pick the ZIP. App usage, surroundings readings, labels and places are merged without duplicates, and routines are rebuilt.
+
 ### Permissions Required
 The app requires the following permissions to function fully:
 - **Usage Access**: To read app usage statistics.

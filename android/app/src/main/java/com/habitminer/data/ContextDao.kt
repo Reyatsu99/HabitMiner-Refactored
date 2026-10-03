@@ -11,6 +11,12 @@ interface ContextDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(snapshot: ContextSnapshotEntity)
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(snapshots: List<ContextSnapshotEntity>)
+
+    @Query("SELECT timestamp FROM context_snapshots")
+    suspend fun getAllTimestamps(): List<Long>
+
     @Query("SELECT * FROM context_snapshots ORDER BY timestamp DESC LIMIT 1")
     fun getLatestSnapshot(): Flow<ContextSnapshotEntity?>
 

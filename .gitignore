@@ -55,6 +55,8 @@ android/.cxx/
 *.aar
 *.keystore
 *.jks
+# Shared debug signing key (public, debug-only) so every build can update the installed app
+!android/app/debug.keystore
 
 # IDEs & Editors
 .idea/
