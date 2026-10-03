@@ -5,7 +5,7 @@
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)  
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.0-purple.svg)](https://kotlinlang.org/)  
 [![Android](https://img.shields.io/badge/Platform-Android-green.svg)](https://developer.android.com/)
-[![Release](https://img.shields.io/badge/Release-v1.0.4-blue.svg)](https://github.com/Reyatsu99/HabitMiner/releases/tag/v1.0.4)
+[![Version](https://img.shields.io/badge/Version-1.2.0-blue.svg)](https://github.com/Reyatsu99/HabitMiner-Refactored/releases)
 
 ---
 
@@ -19,6 +19,83 @@ Instead of relying on battery-draining GPS tracking or microphone recording, the
 4. **Notifications**: Tracks notification volumes to gauge digital interruptions.
 
 The on-device **HabitEngine** aggregates this data to build temporal baselines (e.g., Weekday Mornings vs. Weekend Nights), discovers frequent app sequences (e.g., `Instagram → YouTube → Browser`), and detects anomalies or **Deviations** when your digital routine changes significantly.
+
+---
+
+## 📸 Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/overview.png" alt="HabitMiner screens: Today, History, Insights, Blueprint and Data health" width="100%">
+</p>
+
+<table>
+  <tr>
+    <td align="center" valign="top" width="33%">
+      <img src="docs/screenshots/today_overview.png" alt="Today" width="250"><br>
+      <b>Today</b><br>
+      <sub>Screen time against what's usual by now, today's curve vs a typical day, and top apps or categories.</sub>
+    </td>
+    <td align="center" valign="top" width="33%">
+      <img src="docs/screenshots/today_sleep_pickups.png" alt="Sleep &amp; pickups" width="250"><br>
+      <b>Sleep &amp; pickups</b><br>
+      <sub>Estimated sleep from overnight screen-off time, and how many pickups followed a notification.</sub>
+    </td>
+    <td align="center" valign="top" width="33%">
+      <img src="docs/screenshots/today_routines_context.png" alt="Routines &amp; surroundings" width="250"><br>
+      <b>Routines &amp; surroundings</b><br>
+      <sub>Your most reliable app sequences, current light, motion and battery, and the likely next app.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" valign="top" width="33%">
+      <img src="docs/screenshots/today_checkin.png" alt="Quick check-in" width="250"><br>
+      <b>Quick check-in</b><br>
+      <sub>One-tap "what are you doing?" answers, saved as ground-truth labels for evaluation.</sub>
+    </td>
+    <td align="center" valign="top" width="33%">
+      <img src="docs/screenshots/history.png" alt="History timeline" width="250"><br>
+      <b>History timeline</b><br>
+      <sub>A 24-hour strip of app use by category, with light, motion, charging and sleep lanes.</sub>
+    </td>
+    <td align="center" valign="top" width="33%">
+      <img src="docs/screenshots/insights_deviations.png" alt="Unusual moments" width="250"><br>
+      <b>Unusual moments</b><br>
+      <sub>Deviations explained in plain language, with Expected / Unusual feedback.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" valign="top" width="33%">
+      <img src="docs/screenshots/insights_routines.png" alt="Routines &amp; predictability" width="250"><br>
+      <b>Routines &amp; predictability</b><br>
+      <sub>Measured next-app accuracy against simple baselines, and routines grouped across time slots.</sub>
+    </td>
+    <td align="center" valign="top" width="33%">
+      <img src="docs/screenshots/blueprint_day_and_week.png" alt="Blueprint: day &amp; week" width="250"><br>
+      <b>Blueprint: day &amp; week</b><br>
+      <sub>Today vs a usual day, and a 7-day heatmap of when you use your phone (tap a square for details).</sub>
+    </td>
+    <td align="center" valign="top" width="33%">
+      <img src="docs/screenshots/blueprint_day_types.png" alt="Blueprint: kinds of days" width="250"><br>
+      <b>Blueprint: kinds of days</b><br>
+      <sub>Days grouped with k-means, this week vs last week, and estimated sleep per night.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" valign="top" width="33%">
+      <img src="docs/screenshots/blueprint_insights.png" alt="Context insights" width="250"><br>
+      <b>Context insights</b><br>
+      <sub>How surroundings relate to use, such as time in the dark or after midnight.</sub>
+    </td>
+    <td align="center" valign="top" width="33%">
+      <img src="docs/screenshots/health.png" alt="Data health" width="250"><br>
+      <b>Data health</b><br>
+      <sub>Collection status, battery-aware sensing mode and its cost, and live sensor status.</sub>
+    </td>
+    <td width="33%"></td>
+  </tr>
+</table>
+
+<sub>Screens are rendered by the app's screenshot tests (Robolectric, dark theme) with two weeks of sample data, so the numbers are illustrative. Regenerate with <code>./gradlew testDebugUnitTest --tests "*ScreenshotTest*"</code>; images land in <code>android/app/build/screenshots</code>.</sub>
 
 ---
 
