@@ -102,5 +102,30 @@ class ScreenshotTest {
     fun insightsBlueprint() = shoot("6_insights_blueprint") { InsightsScreen(data.state, NoActions, initialTab = 2) }
 
     @Test
-    fun health() = shoot("7_health") { HealthScreen(data.state) }
+    fun health() {
+        // Robolectric devices have no sensors; register the five the app uses so the
+        // Health screen renders like it does on a phone.
+        // System services are per context, so register on both the app and the activity.
+        val contexts =
+            listOf<android.content.Context>(
+                androidx.test.core.app.ApplicationProvider.getApplicationContext<Application>(),
+                rule.activity,
+            )
+        for (context in contexts) {
+            val sensorManager = context.getSystemService(android.content.Context.SENSOR_SERVICE) as android.hardware.SensorManager
+            val shadow = org.robolectric.Shadows.shadowOf(sensorManager)
+            listOf(
+                android.hardware.Sensor.TYPE_ACCELEROMETER,
+                android.hardware.Sensor.TYPE_GYROSCOPE,
+                android.hardware.Sensor.TYPE_LIGHT,
+                android.hardware.Sensor.TYPE_PROXIMITY,
+                android.hardware.Sensor.TYPE_STEP_COUNTER,
+            ).forEach { type ->
+                if (sensorManager.getDefaultSensor(type) == null) {
+                    shadow.addSensor(org.robolectric.shadows.ShadowSensor.newInstance(type))
+                }
+            }
+        }
+        shoot("7_health") { HealthScreen(data.state) }
+    }
 }
