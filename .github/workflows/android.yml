@@ -100,6 +100,23 @@ jobs:
                   break
           EOF
 
+      # Print what Room expects for each table so hand-written migrations can be compared.
+      - name: Report Room schema
+        if: always()
+        run: |
+          python3 - <<'EOF'
+          import glob, json
+          for path in sorted(glob.glob("app/schemas/**/*.json", recursive=True)):
+              db = json.load(open(path))["database"]
+              lines = [f"version {db['version']}"]
+              for e in db["entities"]:
+                  lines.append(e["createSql"].replace("${TABLE_NAME}", e["tableName"]))
+                  for idx in e.get("indices", []):
+                      lines.append(idx["createSql"].replace("${TABLE_NAME}", e["tableName"]))
+              msg = "\n".join(lines).replace("%", "%25").replace("\n", "%0A")
+              print(f"::notice title=Room schema {path.split('/')[-1]}::{msg}")
+          EOF
+
       - name: Upload debug APK
         if: success()
         uses: actions/upload-artifact@v4

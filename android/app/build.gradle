@@ -57,6 +57,11 @@ android {
     }
 }
 
+// Export Room's schema so database migrations can be checked against it (see CI).
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 spotless {
     kotlin {
         target '**/*.kt'
