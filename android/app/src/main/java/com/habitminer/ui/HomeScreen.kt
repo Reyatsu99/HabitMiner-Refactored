@@ -515,7 +515,11 @@ fun ContextNowCard(state: HabitUiState) {
                     )
                 }
                 s.proximityNear?.let { ContextChip(if (it) "📱 Covered / in pocket" else "📱 In hand or on a surface") }
-                if (s.stepsSinceLastSnapshot > 0) ContextChip("👣 ${s.stepsSinceLastSnapshot} steps")
+            }
+            when {
+                state.stepsToday >= 0 -> ContextChip("👣 ${"%,d".format(state.stepsToday)} steps today")
+                state.stepSensorAvailable && state.stepPermission -> ContextChip("👣 Counting starts with your next steps")
+                else -> Unit
             }
             latest?.let { l ->
                 if (l.batteryLevel in 0..100) ContextChip("🔋 ${l.batteryLevel}%" + if (l.isCharging) " · charging" else "")

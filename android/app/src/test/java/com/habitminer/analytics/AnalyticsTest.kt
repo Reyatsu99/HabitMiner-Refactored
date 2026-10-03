@@ -350,3 +350,34 @@ class PolicyAndFormatTest {
         assertEquals("23:30", Format.clockFromMinutes(-30))
     }
 }
+
+class StepMathTest {
+    private val day = LocalDate.of(2026, 10, 3)
+
+    @Test
+    fun `counts steps through the day and across a reboot`() {
+        var st = StepMath.advance(null, day, 10_000)
+        assertEquals(0L, st.stepsToday)
+        st = StepMath.advance(st, day, 10_250)
+        assertEquals(250L, st.stepsToday)
+        st = StepMath.advance(st, day, 40) // rebooted: counter restarted
+        assertEquals(290L, st.stepsToday)
+        st = StepMath.advance(st, day, 100)
+        assertEquals(350L, st.stepsToday)
+    }
+
+    @Test
+    fun `new day starts from yesterday's last reading, but not after a long gap`() {
+        val yesterday = StepMath.DayState(day.minusDays(1), base = 0, carried = 0, last = 5_000)
+        assertEquals(120L, StepMath.advance(yesterday, day, 5_120).stepsToday)
+        val stale = StepMath.DayState(day.minusDays(3), base = 0, carried = 0, last = 5_000)
+        assertEquals(0L, StepMath.advance(stale, day, 9_000).stepsToday)
+    }
+
+    @Test
+    fun `delta between readings handles first reading and reboot`() {
+        assertEquals(0L, StepMath.delta(null, 500))
+        assertEquals(30L, StepMath.delta(500, 530))
+        assertEquals(12L, StepMath.delta(530, 12))
+    }
+}

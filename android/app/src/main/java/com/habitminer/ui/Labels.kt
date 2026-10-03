@@ -45,6 +45,7 @@ object Labels {
                 }
         }
         if (parts.isEmpty()) parts += if (s.isScreenOn) "No sensor reading" else "Screen off"
+        if (s.stepsSinceLastSnapshot > 0) parts += "${s.stepsSinceLastSnapshot} steps"
         if (s.batteryLevel in 0..100) parts += "${s.batteryLevel}% battery" + if (s.isCharging) ", charging" else ""
         return parts.joinToString(" · ")
     }

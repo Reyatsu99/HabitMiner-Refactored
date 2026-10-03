@@ -30,9 +30,9 @@ class SensorContextCollector
     @Inject
     constructor(
         @ApplicationContext private val context: Context,
+        private val stepCounterMonitor: StepCounterMonitor,
     ) {
         private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
-        private val prefs = context.getSharedPreferences("sensor_prefs", Context.MODE_PRIVATE)
         private val sensorThread = android.os.HandlerThread("SensorThread").apply { start() }
         private val sensorHandler = Handler(sensorThread.looper)
 
@@ -66,16 +66,18 @@ class SensorContextCollector
                     val accelDeferred = async { collectMotionState(Sensor.TYPE_ACCELEROMETER) }
                     val gyroDeferred = async { collectMotionState(Sensor.TYPE_GYROSCOPE) }
                     val proxDeferred = async { collectProximityState() }
-                    val stepDeferred = async { collectStepDelta() }
 
                     lightLux = lightDeferred.await() ?: -1f
                     accelStats = accelDeferred.await()
                     gyroStats = gyroDeferred.await()
                     proximityNear = proxDeferred.await()
-                    stepsDelta = stepDeferred.await()
                 }
                 sensingMs = android.os.SystemClock.elapsedRealtime() - sensingStart
             }
+
+            // Steps come from the always-on step counter, so they are recorded whether or not
+            // the screen is on (the other sensors are only sampled with the screen on).
+            stepsDelta = collectStepDelta()
 
             return ContextSnapshotEntity(
                 timestamp = timestamp,
@@ -250,59 +252,43 @@ class SensorContextCollector
             }
 
         private suspend fun collectStepDelta(): Int {
-            if (
-                android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q &&
-                androidx.core.content.ContextCompat.checkSelfPermission(
-                    context,
-                    android.Manifest.permission.ACTIVITY_RECOGNITION,
-                ) != android.content.pm.PackageManager.PERMISSION_GRANTED
-            ) {
-                return -1
-            }
-            return withTimeoutOrNull(2000L) {
-                suspendCancellableCoroutine { continuation ->
-                    val stepSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
-                    if (stepSensor == null) {
-                        continuation.resume(-1)
-                        return@suspendCancellableCoroutine
-                    }
+            if (!stepCounterMonitor.hasPermission() || !stepCounterMonitor.hasSensor()) return -1
+            stepCounterMonitor.start()
+            stepCounterMonitor.takeDeltaSinceLastSnapshot()?.let { return it }
 
-                    val listener =
-                        object : SensorEventListener {
-                            override fun onSensorChanged(event: SensorEvent?) {
-                                if (event?.sensor?.type == Sensor.TYPE_STEP_COUNTER) {
-                                    sensorManager.unregisterListener(this)
-                                    if (continuation.isActive) {
-                                        val currentSteps = event.values[0].toInt()
-                                        val lastSteps = prefs.getInt("last_step_count", -1)
-
-                                        prefs.edit().putInt("last_step_count", currentSteps).apply()
-
-                                        if (lastSteps == -1 || currentSteps < lastSteps) {
-                                            // Reboot or first time
-                                            continuation.resume(0)
-                                        } else {
-                                            continuation.resume(currentSteps - lastSteps)
-                                        }
+            // The monitor hasn't heard from the counter yet (no steps since the app started).
+            // Some phones report the current total on registration, so try a short read.
+            val counter =
+                withTimeoutOrNull(2000L) {
+                    suspendCancellableCoroutine<Long?> { continuation ->
+                        val stepSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
+                        if (stepSensor == null) {
+                            continuation.resume(null)
+                            return@suspendCancellableCoroutine
+                        }
+                        val listener =
+                            object : SensorEventListener {
+                                override fun onSensorChanged(event: SensorEvent?) {
+                                    if (event?.sensor?.type == Sensor.TYPE_STEP_COUNTER) {
+                                        sensorManager.unregisterListener(this)
+                                        if (continuation.isActive) continuation.resume(event.values[0].toLong())
                                     }
                                 }
+
+                                override fun onAccuracyChanged(
+                                    sensor: Sensor?,
+                                    accuracy: Int,
+                                ) {}
                             }
-
-                            override fun onAccuracyChanged(
-                                sensor: Sensor?,
-                                accuracy: Int,
-                            ) {}
+                        if (!sensorManager.registerListener(listener, stepSensor, SensorManager.SENSOR_DELAY_NORMAL, sensorHandler)) {
+                            continuation.resume(null)
+                            return@suspendCancellableCoroutine
                         }
-
-                    val registered = sensorManager.registerListener(listener, stepSensor, SensorManager.SENSOR_DELAY_NORMAL, sensorHandler)
-                    if (!registered) {
-                        continuation.resume(-1)
-                        return@suspendCancellableCoroutine
-                    }
-                    continuation.invokeOnCancellation {
-                        sensorManager.unregisterListener(listener)
+                        continuation.invokeOnCancellation { sensorManager.unregisterListener(listener) }
                     }
                 }
-            } ?: -1
+            if (counter == null) return -1
+            stepCounterMonitor.record(counter)
+            return stepCounterMonitor.takeDeltaSinceLastSnapshot() ?: -1
         }
     }

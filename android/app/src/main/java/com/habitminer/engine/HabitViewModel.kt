@@ -113,6 +113,10 @@ data class HabitUiState(
     val places: ImmutableList<com.habitminer.data.PlaceEntity> = persistentListOf(),
     val sensingModeName: String? = null,
     val sensingMsToday: Long = 0L,
+    /** Steps counted today by the hardware step counter, or -1 before the first reading. */
+    val stepsToday: Long = -1L,
+    val stepSensorAvailable: Boolean = true,
+    val stepPermission: Boolean = true,
 )
 
 @OptIn(FlowPreview::class)
@@ -136,6 +140,7 @@ class HabitViewModel
         private val wifiPlaceProvider: com.habitminer.collection.WifiPlaceProvider,
         private val labelContextCapture: com.habitminer.proactive.LabelContextCapture,
         private val importManager: com.habitminer.data.ImportManager,
+        private val stepCounterMonitor: com.habitminer.collection.StepCounterMonitor,
     ) : AndroidViewModel(application), HabitActions {
         private val _uiState = MutableStateFlow(HabitUiState(selectedHistoryDate = getStartOfDay()))
         val uiState: StateFlow<HabitUiState> = _uiState.asStateFlow()
@@ -196,6 +201,8 @@ class HabitViewModel
                         android.content.pm.PackageManager.PERMISSION_GRANTED
                 }
 
+            // Permission may have just been granted on the permission screen.
+            stepCounterMonitor.start()
             _uiState.update {
                 it.copy(
                     hasUsagePermission = hasUsage,
@@ -203,6 +210,8 @@ class HabitViewModel
                     hasRuntimePermissions = hasRuntime,
                     retentionDays = retentionDays,
                     features = readFeatureSettings(),
+                    stepSensorAvailable = stepCounterMonitor.hasSensor(),
+                    stepPermission = stepCounterMonitor.hasPermission(),
                 )
             }
 
@@ -670,6 +679,17 @@ class HabitViewModel
                                 )
                             }
                         }
+                    }
+
+                    launch {
+                        stepCounterMonitor.stepsToday.collect { steps ->
+                            _uiState.update { it.copy(stepsToday = steps) }
+                        }
+                    }
+
+                    launch {
+                        // Resets "steps today" after midnight even if no new steps arrive.
+                        startOfDayFlow.collect { stepCounterMonitor.refreshDay() }
                     }
 
                     launch {

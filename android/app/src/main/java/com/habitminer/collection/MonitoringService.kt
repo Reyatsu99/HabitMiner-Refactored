@@ -58,6 +58,9 @@ class MonitoringService : Service() {
     @Inject
     lateinit var feedbackRepository: com.habitminer.repository.FeedbackRepository
 
+    @Inject
+    lateinit var stepCounterMonitor: StepCounterMonitor
+
     // Battery-aware sensing: the loop interval follows the current mode (5–30 min).
     @Volatile private var sensingMode: com.habitminer.analytics.SensingMode = com.habitminer.analytics.SensingMode.NORMAL
 
@@ -109,6 +112,8 @@ class MonitoringService : Service() {
         super.onCreate()
         createNotificationChannel()
         isServiceRunning.value = true
+        // Keep the hardware step counter listening for as long as monitoring runs.
+        stepCounterMonitor.start()
 
         try {
             ContextCompat.registerReceiver(

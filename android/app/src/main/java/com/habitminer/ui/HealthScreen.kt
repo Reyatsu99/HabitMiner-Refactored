@@ -57,6 +57,8 @@ private data class SensorStatus(
     val name: String,
     val present: Boolean,
     val lastReading: String?,
+    /** Shown when the sensor exists but hasn't reported yet. */
+    val pendingText: String = "No reading yet",
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -67,7 +69,7 @@ fun HealthScreen(state: HabitUiState) {
     val df = remember { SimpleDateFormat("d MMM, HH:mm", Locale.getDefault()) }
     var showDiagnostics by remember { mutableStateOf(false) }
 
-    val sensors = sensorStatuses(sensorManager, state.latestSensorContext)
+    val sensors = sensorStatuses(sensorManager, state.latestSensorContext, state.stepsToday, state.stepPermission)
     val working = sensors.count { it.present && it.lastReading != null }
     val present = sensors.count { it.present }
 
@@ -138,7 +140,7 @@ fun HealthScreen(state: HabitUiState) {
                         when {
                             !s.present -> "Not on this phone" to StatusError
                             s.lastReading != null -> s.lastReading to StatusSuccess
-                            else -> "No reading yet" to StatusWarning
+                            else -> s.pendingText to StatusWarning
                         }
                     InfoRow(s.name, status, color)
                 }
@@ -235,6 +237,8 @@ private fun StatusBanner(
 private fun sensorStatuses(
     sm: SensorManager,
     latest: ContextSnapshotEntity?,
+    stepsToday: Long,
+    stepPermission: Boolean,
 ): List<SensorStatus> {
     fun has(type: Int) = sm.getDefaultSensor(type) != null
     val fresh = latest?.takeIf { System.currentTimeMillis() - it.timestamp < 24 * 60 * 60 * 1000L }
@@ -264,7 +268,12 @@ private fun sensorStatuses(
         SensorStatus(
             "Step counter",
             has(Sensor.TYPE_STEP_COUNTER),
-            fresh?.stepsSinceLastSnapshot?.takeIf { it >= 0 }?.let { "$it steps since last reading" },
+            when {
+                !stepPermission -> null
+                stepsToday >= 0 -> "${"%,d".format(stepsToday)} steps today"
+                else -> null
+            },
+            pendingText = if (stepPermission) "Waiting for your first steps" else "Needs Physical activity permission",
         ),
     )
 }
