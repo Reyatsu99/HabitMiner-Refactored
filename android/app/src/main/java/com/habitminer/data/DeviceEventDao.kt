@@ -15,6 +15,12 @@ interface DeviceEventDao {
         sinceMs: Long,
     ): Int
 
+    @Query("SELECT * FROM device_events WHERE eventType = :eventType AND timestamp >= :sinceMs ORDER BY timestamp ASC")
+    suspend fun getSince(
+        eventType: String,
+        sinceMs: Long,
+    ): List<DeviceEventEntity>
+
     @Query("DELETE FROM device_events WHERE timestamp < :timestampMs")
     suspend fun deleteOlderThan(timestampMs: Long)
 

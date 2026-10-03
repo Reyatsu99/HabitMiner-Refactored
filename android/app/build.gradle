@@ -15,8 +15,8 @@ android {
         applicationId "com.habitminer"
         minSdk 26           // Android 8.0 — required for WorkManager background execution guarantees
         targetSdk 34
-        versionCode 1
-        versionName "1.0.0"
+        versionCode 3
+        versionName "1.2.0"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -25,6 +25,7 @@ android {
     }
 
     testOptions {
+        unitTests.includeAndroidResources = true
         unitTests.all {
             systemProperty 'net.bytebuddy.experimental', 'true'
         }
@@ -55,6 +56,11 @@ android {
             excludes += '/META-INF/{AL2.0,LGPL2.1}'
         }
     }
+}
+
+// Export Room's schema so database migrations can be checked against it (see CI).
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
 }
 
 spotless {
@@ -113,6 +119,12 @@ dependencies {
     androidTestImplementation 'androidx.test.ext:junit:1.1.5'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
     androidTestImplementation 'androidx.compose.ui:ui-test-junit4'
+
+    // Screenshot tests: render Compose screens on the JVM with Robolectric (native graphics)
+    testImplementation composeBom
+    testImplementation 'androidx.compose.ui:ui-test-junit4'
+    testImplementation 'org.robolectric:robolectric:4.14.1'
+    testImplementation 'androidx.test.ext:junit:1.1.5'
 
     // Room test helpers
     testImplementation "androidx.room:room-testing:$room_version"

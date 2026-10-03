@@ -5,27 +5,21 @@ package com.habitminer.ui
 import android.content.Context
 import android.hardware.Sensor
 import android.hardware.SensorManager
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.BatteryChargingFull
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Sensors
-import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -33,28 +27,36 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.habitminer.analytics.Format
+import com.habitminer.analytics.SensingMode
+import com.habitminer.data.ContextSnapshotEntity
 import com.habitminer.engine.HabitUiState
-import com.habitminer.ui.theme.StatusSuccess
+import com.habitminer.ui.components.CardHeader
+import com.habitminer.ui.components.Hint
+import com.habitminer.ui.components.InfoRow
+import com.habitminer.ui.components.SurfaceCard
 import com.habitminer.ui.theme.StatusError
-import androidx.compose.material3.LinearProgressIndicator
+import com.habitminer.ui.theme.StatusSuccess
+import com.habitminer.ui.theme.StatusWarning
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-data class SensorInfo(
+private data class SensorStatus(
     val name: String,
-    val vendor: String,
-    val isAvailable: Boolean,
+    val present: Boolean,
+    val lastReading: String?,
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -62,419 +64,228 @@ data class SensorInfo(
 fun HealthScreen(state: HabitUiState) {
     val context = LocalContext.current
     val sensorManager = remember { context.getSystemService(Context.SENSOR_SERVICE) as SensorManager }
+    val df = remember { SimpleDateFormat("d MMM, HH:mm", Locale.getDefault()) }
+    var showDiagnostics by remember { mutableStateOf(false) }
 
-    val allSensors =
-        remember {
-            val requiredTypes =
-                listOf(
-                    Pair(Sensor.TYPE_ACCELEROMETER, "Accelerometer"),
-                    Pair(Sensor.TYPE_GYROSCOPE, "Gyroscope"),
-                    Pair(Sensor.TYPE_PROXIMITY, "Proximity"),
-                    Pair(Sensor.TYPE_LIGHT, "Ambient Light"),
-                    Pair(Sensor.TYPE_STEP_COUNTER, "Step Counter"),
-                )
+    val sensors = sensorStatuses(sensorManager, state.latestSensorContext)
+    val working = sensors.count { it.present && it.lastReading != null }
+    val present = sensors.count { it.present }
 
-            requiredTypes.map { (type, typeName) ->
-                val sensor = sensorManager.getDefaultSensor(type)
-                if (sensor != null) {
-                    SensorInfo(name = typeName, vendor = sensor.vendor ?: "Unknown", isAvailable = true)
-                } else {
-                    SensorInfo(name = typeName, vendor = "N/A", isAvailable = false)
-                }
-            }.sortedBy { !it.isAvailable }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        item {
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = "Data health",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onBackground,
+            )
+            Hint("Is HabitMiner collecting properly, and what does it cost?")
         }
-    val activeSensors = allSensors.count { it.isAvailable }
 
-    val df = remember { SimpleDateFormat("MM/dd HH:mm", Locale.getDefault()) }
-    val usageTime = state.lastUsageUpdate?.let { df.format(Date(it)) } ?: "Never"
-    val contextTime = state.latestContext?.timestamp?.let { df.format(Date(it)) } ?: "Never"
+        item { StatusBanner(state, context) }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        TopAppBar(
-            title = { Text("Data Health", fontWeight = FontWeight.SemiBold) },
-            colors =
-                TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                    titleContentColor = MaterialTheme.colorScheme.onBackground,
-                ),
-        )
-
-        LazyColumn(
-            modifier =
-                Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            item {
-                if (!state.hasUsagePermission || !state.hasRuntimePermissions || !state.hasNotificationPermission) {
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Warning, contentDescription = "Warning", tint = MaterialTheme.colorScheme.onErrorContainer)
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Text(
-                                "Collection halted. Permissions missing.",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onErrorContainer,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                        }
-                    }
-                } else if (state.daysOfData == 0 && state.liveUsageRecordCount == 0) {
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Sensors, contentDescription = "Active", tint = MaterialTheme.colorScheme.onPrimaryContainer)
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Text(
-                                "Waiting for first live collection run.",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                        }
-                    }
-                } else if (!state.isMonitoringServiceActive) {
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                        onClick = {
-                            try {
-                                val intent =
-                                    android.content.Intent().apply {
-                                        action = android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS
-                                    }
-                                context.startActivity(intent)
-                            } catch (e: Exception) {
-                                // Ignore
-                            }
-                        },
-                    ) {
-                        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Warning, contentDescription = "Warning", tint = MaterialTheme.colorScheme.onErrorContainer)
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    "Foreground Service Killed",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onErrorContainer,
-                                    fontWeight = FontWeight.Bold,
-                                )
-                                Text(
-                                    "Your device (e.g. Xiaomi) may be aggressively killing the service. " +
-                                        "Tap to open battery settings and disable restrictions.",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onErrorContainer,
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            item {
-                Text(
-                    text = "Background Operation",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onBackground,
+        item {
+            SurfaceCard {
+                CardHeader("Collection", Icons.Default.CheckCircle)
+                Spacer(modifier = Modifier.height(6.dp))
+                InfoRow(
+                    "Background monitoring",
+                    if (state.isMonitoringServiceActive) "Running" else "Stopped",
+                    if (state.isMonitoringServiceActive) StatusSuccess else StatusError,
                 )
-                Spacer(modifier = Modifier.height(8.dp))
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("WorkManager (Periodic sync)", style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                if (state.hasUsagePermission) "Active" else "Inactive",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = if (state.hasUsagePermission) StatusSuccess else MaterialTheme.colorScheme.error,
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Foreground Service", style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                if (state.isMonitoringServiceActive) "Active" else "Stopped/Dead",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = if (state.isMonitoringServiceActive) StatusSuccess else MaterialTheme.colorScheme.error,
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Last App Usage Sync", style = MaterialTheme.typography.bodyMedium)
-                            Text(usageTime, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Last Context Snapshot", style = MaterialTheme.typography.bodyMedium)
-                            Text(contextTime, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Background Restrictions", style = MaterialTheme.typography.bodyMedium)
-
-                            val am = context.getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager
-                            val isRestricted =
-                                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
-                                    am.isBackgroundRestricted
-                                } else {
-                                    false
-                                }
-
-                            Text(
-                                if (isRestricted) "Restricted (Action Needed)" else "Unrestricted",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = if (isRestricted) MaterialTheme.colorScheme.error else StatusSuccess,
-                            )
-                        }
+                InfoRow("Last app usage update", state.lastUsageUpdate?.let { df.format(Date(it)) } ?: "Never")
+                InfoRow("Last surroundings reading", state.latestContext?.timestamp?.let { df.format(Date(it)) } ?: "Never")
+                val restricted =
+                    remember {
+                        val am = context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+                        android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P && am.isBackgroundRestricted
                     }
-                }
-            }
-
-            item {
-                Text(
-                    text = "Data Coverage & Provenance",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onBackground,
+                InfoRow(
+                    "Battery restrictions",
+                    if (restricted) "Restricted (action needed)" else "None",
+                    if (restricted) StatusError else StatusSuccess,
                 )
-                Spacer(modifier = Modifier.height(8.dp))
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Historical Backfill (UsageStats)", style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                "${state.historicalUsageRecordCount} records",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Live Collection (HabitMiner)", style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                "${state.liveUsageRecordCount} records",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Hardware Context Snapshots", style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                "${state.contextRecordCount} records",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                        }
-                    }
-                }
             }
+        }
 
-            item {
-                Text(
-                    text = "Learning Status",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onBackground,
+        item {
+            val mode = state.sensingModeName?.let { runCatching { SensingMode.valueOf(it) }.getOrNull() }
+            SurfaceCard {
+                CardHeader("Battery-aware sensing", Icons.Default.BatteryChargingFull, tint = StatusSuccess)
+                Spacer(modifier = Modifier.height(6.dp))
+                InfoRow("Current mode", mode?.let { "${it.label} · every ${it.intervalMs / 60_000} min" } ?: "Starting…")
+                mode?.let { Hint(it.explanation) }
+                Spacer(modifier = Modifier.height(4.dp))
+                InfoRow("Sensors switched on today", formatSeconds(state.sensingMsToday))
+                InfoRow("Readings today", "${state.todaySnapshots.size}")
+                Hint(
+                    "Each reading turns sensors on for about a second. Sampling speeds up when you're moving with the screen on " +
+                        "and slows down when the phone is idle.",
                 )
-                Spacer(modifier = Modifier.height(8.dp))
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Live Data Period", style = MaterialTheme.typography.bodyMedium)
-                            Text("${state.daysOfData} Days", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Baseline", style = MaterialTheme.typography.bodyMedium)
-                            Text(state.baselineStatus, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                        }
-                        if (state.daysOfData < 5) {
-                            Spacer(modifier = Modifier.height(4.dp))
-                            LinearProgressIndicator(
-                                progress = { (state.daysOfData / 5f).coerceIn(0f, 1f) },
-                                modifier = Modifier.fillMaxWidth(),
-                                color = MaterialTheme.colorScheme.primary,
-                                trackColor = MaterialTheme.colorScheme.primaryContainer,
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Discovered Patterns", style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                "${state.discoveredHabits.size}",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Recent Deviations", style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                "${state.recentDeviations.size}",
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                        }
-                    }
-                }
             }
+        }
 
-            item {
-                Text(
-                    text = "Storage & Retention",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onBackground,
+        item {
+            SurfaceCard {
+                CardHeader("Sensors", Icons.Default.Sensors, trailing = "$working of $present reporting")
+                Spacer(modifier = Modifier.height(6.dp))
+                sensors.forEach { s ->
+                    val (status, color) =
+                        when {
+                            !s.present -> "Not on this phone" to StatusError
+                            s.lastReading != null -> s.lastReading to StatusSuccess
+                            else -> "No reading yet" to StatusWarning
+                        }
+                    InfoRow(s.name, status, color)
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Hint(
+                    state.latestSensorContext?.let { "Last reading ${Labels.age(it.timestamp)}. Sensors are only read while the screen is on." }
+                        ?: "Sensors are only read while the screen is on, so readings appear after you next use your phone.",
                 )
-                Spacer(modifier = Modifier.height(8.dp))
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Storage, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                "Local Database",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurface,
-                            )
-                            val dbFile = context.getDatabasePath("habitminer_db")
-                            val dbSizeKb = if (dbFile.exists()) dbFile.length() / 1024 else 0
-                            Text(
-                                "Size: $dbSizeKb KB",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                "Rolling window: ${state.retentionDays} days",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                            )
-                        }
+            }
+        }
+
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier.fillMaxWidth(),
+                onClick = { showDiagnostics = !showDiagnostics },
+            ) {
+                androidx.compose.foundation.layout.Column(modifier = Modifier.padding(18.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            "Diagnostics",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Icon(if (showDiagnostics) Icons.Default.ExpandLess else Icons.Default.ExpandMore, contentDescription = null)
+                    }
+                    if (showDiagnostics) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        InfoRow("Usage rows from Android's history", "${state.historicalUsageRecordCount}")
+                        InfoRow("Usage rows collected live", "${state.liveUsageRecordCount}")
+                        InfoRow("Surroundings readings", "${state.contextRecordCount}")
+                        InfoRow("Days with data", "${state.daysOfData}")
+                        InfoRow("Baseline", state.baselineStatus)
+                        InfoRow("Routines found (raw)", "${state.discoveredHabits.size}")
+                        InfoRow("Labels collected", "${state.labelCount}")
+                        InfoRow("Database size", databaseSize(context))
+                        InfoRow("Data kept for", "${state.retentionDays} days")
+                    } else {
+                        Hint("Record counts, model status and storage. Tap to show.")
                     }
                 }
             }
+        }
+        item { Spacer(modifier = Modifier.height(24.dp)) }
+    }
+}
 
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = "Sensor Health",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onBackground,
-                    )
-                    Text(
-                        text = "$activeSensors/5 Available",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
-                Spacer(modifier = Modifier.height(8.dp))
-            }
-
-            items(allSensors) { sensor ->
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp).fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Column {
-                            Text(
-                                text = sensor.name,
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurface,
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = sensor.vendor,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                            )
-                            val telemetry = when (sensor.name) {
-                                "Accelerometer" -> state.latestContext?.accelEnergy?.let { "Energy: ${String.format(Locale.US, "%.1f", it)}" }
-                                "Gyroscope" -> state.latestContext?.gyroEnergy?.let { "Energy: ${String.format(Locale.US, "%.1f", it)}" }
-                                "Ambient Light" -> state.latestContext?.lightLux?.let { "${it.toInt()} lx" }
-                                "Proximity" -> state.latestContext?.proximityNear?.let { if (it) "Near" else "Far" }
-                                "Step Counter" -> state.latestContext?.stepsSinceLastSnapshot?.let { "$it steps" }
-                                else -> null
-                            }
-                            if (telemetry != null) {
-                                Spacer(modifier = Modifier.height(2.dp))
-                                Text(
-                                    text = telemetry,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-                        Box(
-                            modifier =
-                                Modifier
-                                    .size(32.dp)
-                                    .background(
-                                        color =
-                                            if (sensor.isAvailable) {
-                                                StatusSuccess.copy(alpha = 0.2f)
-                                            } else {
-                                                StatusError.copy(alpha = 0.2f)
-                                            },
-                                        shape = CircleShape,
-                                    ),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                imageVector = if (sensor.isAvailable) Icons.Default.Check else Icons.Default.Close,
-                                contentDescription = if (sensor.isAvailable) "Available" else "Not Available",
-                                tint = if (sensor.isAvailable) StatusSuccess else StatusError,
-                                modifier = Modifier.size(20.dp),
-                            )
-                        }
+@Composable
+private fun StatusBanner(
+    state: HabitUiState,
+    context: Context,
+) {
+    val (title, body, ok) =
+        when {
+            !state.hasUsagePermission || !state.hasRuntimePermissions || !state.hasNotificationPermission ->
+                Triple("Collection paused", "A permission is missing. Open the Today tab to grant it.", false)
+            !state.isMonitoringServiceActive ->
+                Triple(
+                    "Background monitoring stopped",
+                    "Your phone may be closing HabitMiner to save battery. Tap to open battery settings and allow it to run.",
+                    false,
+                )
+            else -> Triple("Everything is working", "Usage and surroundings are being collected on this phone.", true)
+        }
+    SurfaceCard(
+        onClick =
+            if (!ok && state.hasUsagePermission) {
+                {
+                    runCatching {
+                        context.startActivity(android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
                     }
                 }
+            } else {
+                null
+            },
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                if (ok) Icons.Default.CheckCircle else Icons.Default.Warning,
+                contentDescription = null,
+                tint = if (ok) StatusSuccess else StatusError,
+            )
+            androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(start = 10.dp))
+            androidx.compose.foundation.layout.Column {
+                Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Hint(body)
             }
-
-            item { Spacer(modifier = Modifier.height(32.dp)) }
         }
     }
 }
+
+private fun sensorStatuses(
+    sm: SensorManager,
+    latest: ContextSnapshotEntity?,
+): List<SensorStatus> {
+    fun has(type: Int) = sm.getDefaultSensor(type) != null
+    val fresh = latest?.takeIf { System.currentTimeMillis() - it.timestamp < 24 * 60 * 60 * 1000L }
+    return listOf(
+        SensorStatus(
+            "Motion (accelerometer)",
+            has(Sensor.TYPE_ACCELEROMETER),
+            fresh?.accelVariance?.takeIf { it >= 0f }?.let { v ->
+                if (v < 0.5f) "Still" else if (v < 2f) "Moving" else "Very active"
+            },
+        ),
+        SensorStatus(
+            "Rotation (gyroscope)",
+            has(Sensor.TYPE_GYROSCOPE),
+            fresh?.gyroEnergy?.takeIf { it >= 0f }?.let { "Working" },
+        ),
+        SensorStatus(
+            "Light",
+            has(Sensor.TYPE_LIGHT),
+            fresh?.lightLux?.takeIf { it >= 0f }?.let { "${it.toInt()} lux" },
+        ),
+        SensorStatus(
+            "Proximity",
+            has(Sensor.TYPE_PROXIMITY),
+            fresh?.proximityNear?.let { if (it) "Covered" else "Uncovered" },
+        ),
+        SensorStatus(
+            "Step counter",
+            has(Sensor.TYPE_STEP_COUNTER),
+            fresh?.stepsSinceLastSnapshot?.takeIf { it >= 0 }?.let { "$it steps since last reading" },
+        ),
+    )
+}
+
+/** Room keeps recent writes in the -wal file, so all three files are counted. */
+private fun databaseSize(context: Context): String {
+    val main = context.getDatabasePath("habitminer_database")
+    val bytes =
+        listOf(main, java.io.File(main.path + "-wal"), java.io.File(main.path + "-shm"))
+            .filter { it.exists() }
+            .sumOf { it.length() }
+    return when {
+        bytes <= 0L -> "Unknown"
+        bytes < 1024 * 1024 -> "${bytes / 1024} KB"
+        else -> String.format(Locale.US, "%.1f MB", bytes / (1024.0 * 1024.0))
+    }
+}
+
+private fun formatSeconds(ms: Long): String =
+    when {
+        ms < 1000L -> "under a second"
+        ms < 60_000L -> "${ms / 1000} s"
+        else -> Format.duration(ms) + " ${(ms / 1000) % 60}s"
+    }

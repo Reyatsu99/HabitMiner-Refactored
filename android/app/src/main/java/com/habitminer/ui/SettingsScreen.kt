@@ -46,12 +46,17 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Switch
+import androidx.compose.material3.OutlinedTextField
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 
 @kotlin.OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     state: HabitUiState,
     viewModel: HabitViewModel,
+    onOpenToday: () -> Unit = {},
 ) {
     val context = LocalContext.current
     var confirmClearData by remember { mutableStateOf(false) }
@@ -89,6 +94,44 @@ fun SettingsScreen(
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onBackground,
         )
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Check-ins, nudges and digest
+        SettingsSection(title = "Check-ins & reminders") {
+            SettingsSwitch(
+                title = "Quick check-ins",
+                description = "Up to 3 one-tap \"what are you doing?\" questions a day, 09:00–22:00. Answers become labels for testing the app's guesses.",
+                checked = state.features.checkIns,
+                onChange = viewModel::setCheckInsEnabled,
+            )
+            SettingsSwitch(
+                title = "Gentle nudges",
+                description = "A heads-up after 25 minutes of late-night scrolling or gaming, or an hour straight in the day. Shares the 3-a-day limit.",
+                checked = state.features.nudges,
+                onChange = viewModel::setNudgesEnabled,
+            )
+            SettingsSwitch(
+                title = "Weekly summary",
+                description = "A short recap every Sunday evening.",
+                checked = state.features.digest,
+                onChange = viewModel::setDigestEnabled,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            TextButton(onClick = {
+                viewModel.openCheckIn(null)
+                onOpenToday()
+            }) { Text("Answer a check-in now") }
+            Text(
+                text = "${state.checkInCount} check-ins answered · ${state.labelCount} labels in total",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            )
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        PlacesSection(state, viewModel)
+
         Spacer(modifier = Modifier.height(24.dp))
 
         // Privacy & Data Section
@@ -187,6 +230,128 @@ fun SettingsScreen(
                 TextButton(onClick = { confirmClearData = false }) {
                     Text("Cancel")
                 }
+            },
+        )
+    }
+}
+
+@Composable
+fun SettingsSwitch(
+    title: String,
+    description: String,
+    checked: Boolean,
+    onChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+            Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+            Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+        }
+        Switch(checked = checked, onCheckedChange = onChange)
+    }
+}
+
+/** Opt-in Wi-Fi places: permission request, explanation and renaming. */
+@Composable
+fun PlacesSection(
+    state: HabitUiState,
+    viewModel: HabitViewModel,
+) {
+    var renaming by remember { mutableStateOf<String?>(null) }
+    var newName by remember { mutableStateOf("") }
+    var permissionDenied by remember { mutableStateOf(false) }
+    val launcher =
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+            val granted = result[android.Manifest.permission.ACCESS_FINE_LOCATION] == true
+            permissionDenied = !granted
+            viewModel.setPlacesEnabled(granted)
+        }
+
+    SettingsSection(title = "Places (optional)") {
+        SettingsSwitch(
+            title = "Detect places from Wi-Fi",
+            description =
+                "Groups your phone use by place (e.g. home, campus) using the Wi-Fi network you're connected to. " +
+                    "Only a scrambled ID is stored, never the network name or your location. Android asks for location access to allow this.",
+            checked = state.features.places,
+            onChange = { enable ->
+                if (enable) {
+                    launcher.launch(
+                        arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION),
+                    )
+                } else {
+                    viewModel.setPlacesEnabled(false)
+                }
+            },
+        )
+        if (permissionDenied) {
+            Text(
+                "Location access wasn't granted, so places stay off. You can allow it in Android settings.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+        if (state.features.places) {
+            Text(
+                "Keep location services switched on so Android can share the Wi-Fi ID.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            )
+            val names = state.insights?.placeNames.orEmpty()
+            if (state.places.isEmpty()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "No places yet. They appear after a few readings on Wi-Fi.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                )
+            }
+            state.places.forEach { place ->
+                val display = place.label ?: names[place.placeHash] ?: "Unnamed place"
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(display, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+                        Text(
+                            "Last seen ${Labels.age(place.lastSeen)}" + if (place.label == null) " · suggested name" else "",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        )
+                    }
+                    TextButton(onClick = {
+                        renaming = place.placeHash
+                        newName = place.label ?: ""
+                    }) { Text("Rename") }
+                }
+            }
+        }
+    }
+
+    renaming?.let { hash ->
+        AlertDialog(
+            onDismissRequest = { renaming = null },
+            title = { Text("Name this place") },
+            text = {
+                OutlinedTextField(
+                    value = newName,
+                    onValueChange = { newName = it.take(30) },
+                    singleLine = true,
+                    placeholder = { Text("e.g. Home, Library, Hostel") },
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.renamePlace(hash, newName)
+                    renaming = null
+                }) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = { renaming = null }) { Text("Cancel") }
             },
         )
     }

@@ -1,0 +1,147 @@
+name: Android build
+
+on:
+  push:
+    branches: ['**']
+    paths:
+      - 'android/**'
+      - '.github/workflows/android.yml'
+  pull_request:
+    paths:
+      - 'android/**'
+  workflow_dispatch:
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build APK and run unit tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build debug APK and run unit tests
+        run: |
+          chmod +x gradlew
+          set -o pipefail
+          ./gradlew --no-daemon --stacktrace assembleDebug testDebugUnitTest 2>&1 | tee build.log
+
+      # Turn compiler and test failures into annotations so they show up on the
+      # commit's check run without needing to open the raw logs.
+      - name: Report failures
+        if: failure()
+        run: |
+          python3 - <<'EOF'
+          import re
+
+          log = open("build.log", encoding="utf-8", errors="replace").read().splitlines()
+          root = "${{ github.workspace }}/"
+
+          def esc(s):
+              return s.replace("%", "%25").replace("\r", "").replace("\n", "%0A")
+
+          compile_errors = []
+          for line in log:
+              m = re.match(r"^e: (?:file://)?(.+?\.kts?):(\d+):(\d+) (.*)$", line)
+              if m:
+                  path, ln, col, msg = m.groups()
+                  compile_errors.append((path.replace(root, ""), ln, col, msg))
+              elif line.startswith("e: "):
+                  compile_errors.append((None, None, None, line[3:]))
+
+          for path, ln, col, msg in compile_errors[:10]:
+              if path:
+                  print(f"::error file={path},line={ln},col={col}::{esc(msg)}")
+              else:
+                  print(f"::error::{esc(msg)}")
+
+          if compile_errors:
+              summary = "\n".join(
+                  f"{p}:{l}:{c} {m}" if p else m for p, l, c, m in compile_errors[:80]
+              )
+              print(f"::error title=All compile errors ({len(compile_errors)})::{esc(summary)}")
+
+          # Failed unit tests: the FAILED line plus the following indented lines.
+          failures = []
+          for i, line in enumerate(log):
+              if line.rstrip().endswith(" FAILED") and ">" in line:
+                  block = [line.strip()]
+                  for nxt in log[i + 1 : i + 8]:
+                      if nxt.startswith("    "):
+                          block.append(nxt.strip())
+                      else:
+                          break
+                  failures.append("\n".join(block))
+          if failures:
+              print(f"::error title=Failed tests ({len(failures)})::{esc(chr(10).join(failures[:30]))}")
+
+          # Gradle's own "What went wrong" block (manifest, resource, KSP errors).
+          for i, line in enumerate(log):
+              if line.startswith("* What went wrong:"):
+                  block = []
+                  for nxt in log[i + 1 : i + 25]:
+                      if nxt.startswith("* Try:"):
+                          break
+                      block.append(nxt)
+                  print(f"::error title=Gradle failure::{esc(chr(10).join(block))}")
+                  break
+          EOF
+
+      # Print what Room expects for each table so hand-written migrations can be compared.
+      - name: Report Room schema
+        if: always()
+        run: |
+          python3 - <<'EOF'
+          import glob, json
+          for path in sorted(glob.glob("app/schemas/**/*.json", recursive=True)):
+              db = json.load(open(path))["database"]
+              lines = [f"version {db['version']}"]
+              for e in db["entities"]:
+                  lines.append(e["createSql"].replace("${TABLE_NAME}", e["tableName"]))
+                  for idx in e.get("indices", []):
+                      lines.append(idx["createSql"].replace("${TABLE_NAME}", e["tableName"]))
+              msg = "\n".join(lines).replace("%", "%25").replace("\n", "%0A")
+              print(f"::notice title=Room schema {path.split('/')[-1]}::{msg}")
+          EOF
+
+      # Screenshot tests write PNGs; publish them to a separate branch so they can be
+      # reviewed without downloading artifacts.
+      - name: Publish screenshots
+        if: always() && hashFiles('android/app/build/screenshots/*.png') != ''
+        working-directory: .
+        run: |
+          set -e
+          mkdir -p /tmp/shots
+          cp android/app/build/screenshots/*.png /tmp/shots/
+          git config user.name "habitminer-ci"
+          git config user.email "habitminer-ci@users.noreply.github.com"
+          git checkout -q --orphan screenshots-tmp
+          git rm -rq --cached . > /dev/null
+          cp /tmp/shots/*.png .
+          echo "Screenshots for ${GITHUB_SHA} (${GITHUB_REF_NAME})" > SCREENSHOTS.md
+          git add -f ./*.png SCREENSHOTS.md
+          git commit -q -m "Screenshots for ${GITHUB_SHA}"
+          git push -q -f origin HEAD:refs/heads/ci-screenshots
+
+      - name: Upload debug APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: habitminer-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          retention-days: 14

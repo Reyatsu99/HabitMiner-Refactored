@@ -39,6 +39,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
@@ -51,6 +52,16 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import java.util.Calendar
 import javax.inject.Inject
+
+/** On/off switches for the v1.2 features, mirrored from preferences. */
+@Immutable
+data class FeatureSettings(
+    val checkIns: Boolean = true,
+    val nudges: Boolean = true,
+    val digest: Boolean = true,
+    val places: Boolean = false,
+    val placesPermission: Boolean = false,
+)
 
 @Immutable
 data class HabitUiState(
@@ -88,6 +99,20 @@ data class HabitUiState(
     val selectedHistoryDate: Long = 0L,
     val historicalAppUsage: ImmutableList<AppUsageEntity> = persistentListOf(),
     val historicalSnapshots: ImmutableList<ContextSnapshotEntity> = persistentListOf(),
+    // ---- v1.2 ----
+    val insights: InsightsBundle? = null,
+    /** Latest snapshot that has real sensor readings (sensors pause while the screen is off). */
+    val latestSensorContext: ContextSnapshotEntity? = null,
+    /** Deviation fingerprint → EXPECTED / UNUSUAL. */
+    val deviationFeedback: ImmutableMap<String, String> = persistentMapOf(),
+    val checkInCount: Int = 0,
+    val labelCount: Int = 0,
+    /** Non-null while the check-in sheet should be shown; value is when it was prompted. */
+    val pendingCheckInPromptedAt: Long? = null,
+    val features: FeatureSettings = FeatureSettings(),
+    val places: ImmutableList<com.habitminer.data.PlaceEntity> = persistentListOf(),
+    val sensingModeName: String? = null,
+    val sensingMsToday: Long = 0L,
 )
 
 @OptIn(FlowPreview::class)
@@ -106,7 +131,11 @@ class HabitViewModel
         private val appIdentityResolver: AppIdentityResolver,
         private val exportManager: com.habitminer.data.ExportManager,
         private val habitServiceManager: com.habitminer.collection.HabitServiceManager,
-    ) : AndroidViewModel(application) {
+        private val feedbackRepository: com.habitminer.repository.FeedbackRepository,
+        private val insightsComputer: InsightsComputer,
+        private val wifiPlaceProvider: com.habitminer.collection.WifiPlaceProvider,
+        private val labelContextCapture: com.habitminer.proactive.LabelContextCapture,
+    ) : AndroidViewModel(application), HabitActions {
         private val _uiState = MutableStateFlow(HabitUiState(selectedHistoryDate = getStartOfDay()))
         val uiState: StateFlow<HabitUiState> = _uiState.asStateFlow()
         // One-shot event: emits the file path for the Share Sheet. replay=0 means no re-play
@@ -115,6 +144,14 @@ class HabitViewModel
         val shareExportEvent: SharedFlow<String> = _shareExportEvent.asSharedFlow()
         private var initialCollectionStarted = false
         private val syncMutex = Mutex()
+        private val insightsRefresh = MutableSharedFlow<Unit>(replay = 0, extraBufferCapacity = 1)
+
+        private data class InsightsInputs(
+            val usage: List<AppUsageEntity>,
+            val snapshots: List<ContextSnapshotEntity>,
+            val habits: List<DiscoveredHabitEntity>,
+            val places: List<com.habitminer.data.PlaceEntity>,
+        )
 
         init {
             // checkPermissions() is called by MainActivity.onCreate() and onResume();
@@ -122,7 +159,7 @@ class HabitViewModel
             observeData()
         }
 
-        fun checkPermissions() {
+        override fun checkPermissions() {
             val application = getApplication<Application>()
             val appOps = application.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
             val mode =
@@ -164,6 +201,7 @@ class HabitViewModel
                     hasNotificationPermission = hasNotif,
                     hasRuntimePermissions = hasRuntime,
                     retentionDays = retentionDays,
+                    features = readFeatureSettings(),
                 )
             }
 
@@ -173,7 +211,7 @@ class HabitViewModel
             }
         }
 
-        fun loadHistoricalData() {
+        override fun loadHistoricalData() {
             if (!_uiState.value.hasUsagePermission) return
             val application = getApplication<Application>()
             application.getSharedPreferences(PrefsKeys.PREFS_NAME, Context.MODE_PRIVATE)
@@ -264,6 +302,7 @@ class HabitViewModel
             viewModelScope.launch(Dispatchers.IO) {
                 contextRepository.clearCollectedData()
                 habitRepository.clearModelData()
+                feedbackRepository.clearAll()
                 val application = getApplication<Application>()
                 application.getSharedPreferences(PrefsKeys.PREFS_NAME, Context.MODE_PRIVATE).edit()
                     .remove("source_revision")
@@ -298,7 +337,7 @@ class HabitViewModel
             }
         }
 
-        fun selectHistoryDate(timeInMillis: Long) {
+        override fun selectHistoryDate(timeInMillis: Long) {
             val startOfDay = Calendar.getInstance().apply {
                 this.timeInMillis = timeInMillis
                 set(Calendar.HOUR_OF_DAY, 0)
@@ -309,11 +348,89 @@ class HabitViewModel
             _uiState.update { it.copy(selectedHistoryDate = startOfDay) }
         }
 
-        fun acknowledgeDeviation(deviationId: Long) {
-            viewModelScope.launch {
-                // We'll just delete it for now to acknowledge it
-                habitRepository.deleteDeviation(deviationId)
+        /**
+         * Records whether a deviation was expected or unusual. Stored by fingerprint because
+         * deviations are re-detected (and re-inserted) whenever today's data changes.
+         */
+        override fun giveDeviationFeedback(
+            deviation: DeviationEntity,
+            value: String,
+        ) {
+            viewModelScope.launch(Dispatchers.IO) {
+                feedbackRepository.saveDeviationFeedback(
+                    AnalyticsMappers.fingerprint(deviation),
+                    value,
+                    labelContextCapture.captureJson(),
+                )
             }
+        }
+
+        // ---- Check-ins -------------------------------------------------------------------
+
+        fun openCheckIn(promptedAt: Long?) {
+            _uiState.update { it.copy(pendingCheckInPromptedAt = promptedAt ?: System.currentTimeMillis()) }
+        }
+
+        override fun dismissCheckIn() {
+            _uiState.update { it.copy(pendingCheckInPromptedAt = null) }
+        }
+
+        override fun answerCheckIn(option: com.habitminer.analytics.CheckInOption) {
+            val promptedAt = _uiState.value.pendingCheckInPromptedAt
+            _uiState.update { it.copy(pendingCheckInPromptedAt = null) }
+            viewModelScope.launch(Dispatchers.IO) {
+                feedbackRepository.saveCheckIn(option.key, promptedAt, labelContextCapture.captureJson())
+                com.habitminer.proactive.Notifier.cancelCheckIn(getApplication())
+            }
+        }
+
+        // ---- Feature switches ------------------------------------------------------------
+
+        private fun readFeatureSettings(): FeatureSettings {
+            val prefs = getApplication<Application>().getSharedPreferences(PrefsKeys.PREFS_NAME, Context.MODE_PRIVATE)
+            return FeatureSettings(
+                checkIns = prefs.getBoolean(PrefsKeys.CHECKINS_ENABLED, true),
+                nudges = prefs.getBoolean(PrefsKeys.NUDGES_ENABLED, true),
+                digest = prefs.getBoolean(PrefsKeys.DIGEST_ENABLED, true),
+                places = wifiPlaceProvider.isEnabled() && wifiPlaceProvider.hasPermission(),
+                placesPermission = wifiPlaceProvider.hasPermission(),
+            )
+        }
+
+        private fun setFlag(
+            key: String,
+            value: Boolean,
+        ) {
+            getApplication<Application>().getSharedPreferences(PrefsKeys.PREFS_NAME, Context.MODE_PRIVATE)
+                .edit().putBoolean(key, value).apply()
+            _uiState.update { it.copy(features = readFeatureSettings()) }
+        }
+
+        fun setCheckInsEnabled(enabled: Boolean) = setFlag(PrefsKeys.CHECKINS_ENABLED, enabled)
+
+        fun setNudgesEnabled(enabled: Boolean) = setFlag(PrefsKeys.NUDGES_ENABLED, enabled)
+
+        fun setDigestEnabled(enabled: Boolean) = setFlag(PrefsKeys.DIGEST_ENABLED, enabled)
+
+        /** Call after the location permission result. Restarts the service so it gains the location type. */
+        fun setPlacesEnabled(enabled: Boolean) {
+            wifiPlaceProvider.setEnabled(enabled && wifiPlaceProvider.hasPermission())
+            _uiState.update { it.copy(features = readFeatureSettings()) }
+            if (_uiState.value.hasUsagePermission) habitServiceManager.startServices()
+        }
+
+        fun renamePlace(
+            placeHash: String,
+            label: String?,
+        ) {
+            viewModelScope.launch(Dispatchers.IO) {
+                feedbackRepository.renamePlace(placeHash, label)
+            }
+        }
+
+        /** Recomputes the insights bundle now (e.g. pull-to-refresh or after returning to the app). */
+        fun refreshInsights() {
+            insightsRefresh.tryEmit(Unit)
         }
 
         fun clearExportMessage() {
@@ -423,7 +540,8 @@ class HabitViewModel
                                         deviationsResult.forEach { dev ->
                                             habitRepository.insertDeviation(
                                                 com.habitminer.data.DeviationEntity(
-                                                    timestamp = System.currentTimeMillis(),
+                                                    // When it happened, not when it was detected.
+                                                    timestamp = dev.occurredAt,
                                                     timeBin = dev.timeBin,
                                                     deviationType = dev.deviationType,
                                                     description = dev.description,
@@ -527,6 +645,73 @@ class HabitViewModel
                         }
                     }
 
+                    launch {
+                        contextRepository.getLatestSnapshotWithSensors().collect { snapshot ->
+                            _uiState.update { it.copy(latestSensorContext = snapshot) }
+                        }
+                    }
+
+                    launch {
+                        feedbackRepository.getAllLabels().collect { labels ->
+                            val feedback =
+                                labels.filter { it.kind == com.habitminer.data.UserLabelEntity.KIND_DEVIATION_FEEDBACK && it.refKey != null }
+                                    .associate { it.refKey!! to it.value }
+                            _uiState.update {
+                                it.copy(
+                                    deviationFeedback = feedback.toImmutableMap(),
+                                    checkInCount = labels.count { l -> l.kind == com.habitminer.data.UserLabelEntity.KIND_CHECK_IN },
+                                    labelCount = labels.size,
+                                )
+                            }
+                        }
+                    }
+
+                    launch {
+                        feedbackRepository.getPlaces().collect { places ->
+                            _uiState.update { it.copy(places = places.toImmutableList()) }
+                        }
+                    }
+
+                    launch {
+                        startOfDayFlow.collectLatest { startOfDay ->
+                            contextRepository.getSensingMsSince(startOfDay).collect { ms ->
+                                val mode =
+                                    getApplication<Application>().getSharedPreferences(PrefsKeys.PREFS_NAME, Context.MODE_PRIVATE)
+                                        .getString(PrefsKeys.SENSING_MODE, null)
+                                _uiState.update { it.copy(sensingMsToday = ms, sensingModeName = mode) }
+                            }
+                        }
+                    }
+
+                    // Insights: recomputed when data changes, every 5 minutes, or on request.
+                    launch {
+                        val ticker =
+                            flow {
+                                while (currentCoroutineContext().isActive) {
+                                    emit(Unit)
+                                    delay(5 * 60_000L)
+                                }
+                            }
+                        combine(
+                            allUsageCache,
+                            contextRepository.getAllSnapshots(),
+                            habitRepository.getAllHabits(),
+                            feedbackRepository.getPlaces(),
+                            merge(ticker, insightsRefresh),
+                        ) { usage, snapshots, habits, places, _ ->
+                            InsightsInputs(usage, snapshots, habits, places)
+                        }.debounce(1_000L).collectLatest { inputs ->
+                            if (inputs.usage.isEmpty()) return@collectLatest
+                            val bundle =
+                                withContext(Dispatchers.Default) {
+                                    runCatching {
+                                        insightsComputer.compute(inputs.usage, inputs.snapshots, inputs.habits, inputs.places)
+                                    }.onFailure { e -> android.util.Log.e("HabitMiner", "Insights failed", e) }.getOrNull()
+                                }
+                            if (bundle != null) _uiState.update { it.copy(insights = bundle) }
+                        }
+                    }
+
                     // Historical Data observation
                     launch {
                         _uiState.map { it.selectedHistoryDate }
@@ -612,6 +797,7 @@ class HabitViewModel
                 // Clear all Room tables
                 contextRepository.clearCollectedData()
                 habitRepository.clearModelData()
+                feedbackRepository.clearAll()
 
                 // Clear all SharedPreferences caches
                 app.getSharedPreferences("sensor_prefs", Context.MODE_PRIVATE).edit().clear().commit()

@@ -22,6 +22,8 @@ class DeviationDetector
             val zScore: Float,
             val normalizedScore: Float,
             val affectedCategory: String,
+            /** When the deviating behaviour happened (not when it was detected). */
+            val occurredAt: Long,
         )
 
         fun detectDeviations(
@@ -79,9 +81,21 @@ class DeviationDetector
                         },
                 )
 
+            val startOfDay =
+                (nowCal.clone() as java.util.Calendar).apply {
+                    set(java.util.Calendar.HOUR_OF_DAY, 0)
+                    set(java.util.Calendar.MINUTE, 0)
+                    set(java.util.Calendar.SECOND, 0)
+                    set(java.util.Calendar.MILLISECOND, 0)
+                }.timeInMillis
+            val nowMs = nowCal.timeInMillis
+
             for ((bin, base) in baselineMap) {
                 if (!bin.startsWith("${todayDayType}_")) continue
                 val timeSlot = bin.substringAfter('_')
+                val slotWord = timeSlot.lowercase()
+                // "this morning", "this evening", but "tonight" rather than "this night".
+                val thisSlot = if (timeSlot == "NIGHT") "tonight" else "this $slotWord"
                 val progress = slotProgress[timeSlot] ?: continue
                 if (progress <= 0f) continue
                 val usages = groupedToday[bin].orEmpty()
@@ -100,12 +114,13 @@ class DeviationDetector
                                 timeBin = bin,
                                 deviationType = "EXCESS_DURATION",
                                 description =
-                                    "Your total screen time was ${formatDuration(todayDuration)} " +
-                                        "in the $timeSlot, versus your usual " +
-                                        "${formatDuration(expectedDuration)} by now. The top app was $cat.",
+                                    "${formatDuration(todayDuration)} on your phone $thisSlot, " +
+                                        "compared with about ${formatDuration(expectedDuration)} by now on a usual day. " +
+                                        "Most of it was $cat.",
                                 zScore = zScore,
                                 normalizedScore = norm,
                                 affectedCategory = cat,
+                                occurredAt = usages.maxOfOrNull { it.endTime } ?: nowMs,
                             ),
                         )
                     }
@@ -119,18 +134,18 @@ class DeviationDetector
                     }.getOrNull() ?: emptyMap()
 
                 for ((cat, duration) in todayCategories) {
-                    if (duration > 5 * 60 * 1000 && !baseCategories.containsKey(cat)) {
+                    if (duration >= NEW_BEHAVIOR_MIN_MS && !baseCategories.containsKey(cat)) {
                         results.add(
                             DeviationResult(
                                 timeBin = bin,
                                 deviationType = "NEW_BEHAVIOR",
                                 description =
-                                    "$cat was used for ${formatDuration(duration)} " +
-                                        "in the $timeSlot, but it is not part of your usual " +
-                                        "routine for this time.",
+                                    "You used $cat for ${formatDuration(duration)} $thisSlot. " +
+                                        "It isn't usually part of your ${slotWord}s.",
                                 zScore = 2.0f,
                                 normalizedScore = 0.8f,
                                 affectedCategory = cat,
+                                occurredAt = usages.filter { it.appName == cat }.minOfOrNull { it.startTime } ?: nowMs,
                             ),
                         )
                     }
@@ -143,24 +158,15 @@ class DeviationDetector
                             timeBin = bin,
                             deviationType = "MISSING_ROUTINE",
                             description =
-                                "Your usual $timeSlot activity of about " +
-                                    "${formatDuration(base.avgScreenTimeMs)} has not appeared today.",
+                                "You usually spend about ${formatDuration(base.avgScreenTimeMs)} on your phone " +
+                                    "in the $slotWord, but barely used it $thisSlot.",
                             zScore = -2.0f,
                             normalizedScore = 0.7f,
                             affectedCategory = "ALL",
+                            occurredAt = slotEndMs(startOfDay, timeSlot).coerceAtMost(nowMs),
                         ),
                     )
                 }
-
-                // Calculate the start of the current day using the already-retrieved nowCal
-                // (cloned so we don't mutate the fields-of-day-of-week check above).
-                val startOfDay =
-                    (nowCal.clone() as java.util.Calendar).apply {
-                        set(java.util.Calendar.HOUR_OF_DAY, 0)
-                        set(java.util.Calendar.MINUTE, 0)
-                        set(java.util.Calendar.SECOND, 0)
-                        set(java.util.Calendar.MILLISECOND, 0)
-                    }.timeInMillis
 
                 val (slotStartHour, slotEndHour) =
                     when (timeSlot) {
@@ -180,11 +186,15 @@ class DeviationDetector
                         it.timestamp in slotStartMs..slotEndMs
                     }
 
-                if (relevantContexts.isNotEmpty()) {
-                    val currentAvgLight = relevantContexts.map { it.lightLux.toDouble() }.average().toFloat()
+                // Sensors are only sampled while the screen is on; -1 means "no reading" and must
+                // never be averaged in (it used to make every slot look dark and still).
+                val motionContexts = relevantContexts.filter { it.accelEnergy >= 0f }
+                val lightContexts = relevantContexts.filter { it.lightLux >= 0f }
+
+                if (motionContexts.size >= MIN_CONTEXT_SAMPLES && base.avgAccelEnergy >= 0f) {
                     val dynamicEnergyThreshold = (base.avgAccelEnergy * 0.5f).coerceAtLeast(2f).coerceAtMost(10f)
-                    val activeCount = relevantContexts.count { it.accelEnergy > dynamicEnergyThreshold }
-                    val currentActiveRatio = activeCount.toFloat() / relevantContexts.size
+                    val activeCount = motionContexts.count { it.accelEnergy > dynamicEnergyThreshold }
+                    val currentActiveRatio = activeCount.toFloat() / motionContexts.size
 
                     val baselineActive = base.avgAccelEnergy > dynamicEnergyThreshold
                     val currentActive = currentActiveRatio > ACTIVE_RATIO_THRESHOLD
@@ -195,11 +205,12 @@ class DeviationDetector
                                 timeBin = bin,
                                 deviationType = "CONTEXT_SHIFT",
                                 description =
-                                    "You are usually active during your $timeSlot " +
-                                        "routine, but today you are stationary.",
+                                    "You're usually on the move during your ${slotWord}s, " +
+                                        "but today you've mostly stayed still.",
                                 zScore = 1.8f,
                                 normalizedScore = 0.75f,
                                 affectedCategory = "ALL",
+                                occurredAt = motionContexts.maxOf { it.timestamp },
                             ),
                         )
                     } else if (!baselineActive && currentActive && currentActiveRatio > 0.6f) {
@@ -208,16 +219,19 @@ class DeviationDetector
                                 timeBin = bin,
                                 deviationType = "CONTEXT_SHIFT",
                                 description =
-                                    "You are usually stationary during your $timeSlot " +
-                                        "routine, but today you are highly active.",
+                                    "You're usually still during your ${slotWord}s, " +
+                                        "but today you've been very active.",
                                 zScore = 1.8f,
                                 normalizedScore = 0.75f,
                                 affectedCategory = "ALL",
+                                occurredAt = motionContexts.maxOf { it.timestamp },
                             ),
                         )
                     }
+                }
 
-                    // Light shift detection (dark vs bright)
+                if (lightContexts.size >= MIN_CONTEXT_SAMPLES && base.avgLightLux >= 0f) {
+                    val currentAvgLight = lightContexts.map { it.lightLux.toDouble() }.average().toFloat()
                     val dynamicDarknessLux = (base.avgLightLux * 0.5f).coerceAtLeast(30f)
                     val dynamicBrightnessLux = (base.avgLightLux * 1.5f).coerceAtLeast(200f).coerceAtMost(1000f)
 
@@ -232,11 +246,12 @@ class DeviationDetector
                                 timeBin = bin,
                                 deviationType = "CONTEXT_SHIFT",
                                 description =
-                                    "Your $timeSlot routine is usually in dark " +
-                                        "environments, but today it is bright.",
+                                    "Your ${slotWord}s are usually spent somewhere dark, " +
+                                        "but today it's been bright.",
                                 zScore = 1.6f,
                                 normalizedScore = 0.65f,
                                 affectedCategory = "ALL",
+                                occurredAt = lightContexts.maxOf { it.timestamp },
                             ),
                         )
                     } else if (baselineBright && currentDark) {
@@ -245,11 +260,12 @@ class DeviationDetector
                                 timeBin = bin,
                                 deviationType = "CONTEXT_SHIFT",
                                 description =
-                                    "Your $timeSlot routine is usually in bright " +
-                                        "environments, but today it is dark.",
+                                    "Your ${slotWord}s are usually spent somewhere bright, " +
+                                        "but today it's been dark.",
                                 zScore = 1.6f,
                                 normalizedScore = 0.65f,
                                 affectedCategory = "ALL",
+                                occurredAt = lightContexts.maxOf { it.timestamp },
                             ),
                         )
                     }
@@ -285,7 +301,24 @@ class DeviationDetector
             return if (minutes >= 60) "${minutes / 60}h ${minutes % 60}m" else "${minutes}m"
         }
 
+        private fun slotEndMs(
+            startOfDay: Long,
+            timeSlot: String,
+        ): Long {
+            val endHour =
+                when (timeSlot) {
+                    "MORNING" -> 12
+                    "AFTERNOON" -> 17
+                    "EVENING" -> 22
+                    else -> 30
+                }
+            return startOfDay + endHour * 3_600_000L
+        }
+
         companion object {
+            /** A new app must be used at least this long in a slot before it counts as new behaviour. */
+            const val NEW_BEHAVIOR_MIN_MS = 10 * 60 * 1000L
+            const val MIN_CONTEXT_SAMPLES = 2
             const val ACTIVE_ENERGY_THRESHOLD = 5f
             const val ACTIVE_RATIO_THRESHOLD = 0.3f
             const val DARKNESS_THRESHOLD_LUX = 20f

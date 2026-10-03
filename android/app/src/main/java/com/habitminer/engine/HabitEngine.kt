@@ -45,6 +45,7 @@ class HabitEngine
 
                 // Extract n-grams (size 2 and 3)
                 val patternCounts = mutableMapOf<List<UsageItem>, Int>()
+                val patternLastSeen = mutableMapOf<List<UsageItem>, Long>()
 
                 for (dayUsages in groupedByDate.values) {
                     val sorted = dayUsages.sortedBy { it.startTime }
@@ -72,6 +73,10 @@ class HabitEngine
                                     }
                                 if (cleanPattern.size >= 2 && seenToday.add(cleanPattern)) {
                                     patternCounts[cleanPattern] = patternCounts.getOrDefault(cleanPattern, 0) + 1
+                                }
+                                if (cleanPattern.size >= 2) {
+                                    val seenAt = sorted[i + size - 1].endTime
+                                    patternLastSeen[cleanPattern] = maxOf(patternLastSeen[cleanPattern] ?: 0L, seenAt)
                                 }
                             }
                         }
@@ -126,7 +131,7 @@ class HabitEngine
                                 timeSlot = timeSlot,
                                 dayType = dayType,
                                 discoveredAt = System.currentTimeMillis(),
-                                lastSeenAt = System.currentTimeMillis(),
+                                lastSeenAt = patternLastSeen[pattern] ?: System.currentTimeMillis(),
                             ),
                         )
                     }

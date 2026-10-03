@@ -48,8 +48,10 @@ class SensorContextCollector
             collectSensors: Boolean,
             batteryLevel: Int,
             isCharging: Boolean,
+            wifiPlace: String? = null,
         ): ContextSnapshotEntity {
             val timestamp = System.currentTimeMillis()
+            var sensingMs = 0L
 
             var lightLux = -1f
             var accelStats: MotionStats? = null
@@ -58,6 +60,7 @@ class SensorContextCollector
             var stepsDelta = -1
 
             if (collectSensors) {
+                val sensingStart = android.os.SystemClock.elapsedRealtime()
                 kotlinx.coroutines.coroutineScope {
                     val lightDeferred = async { collectLightLevel() }
                     val accelDeferred = async { collectMotionState(Sensor.TYPE_ACCELEROMETER) }
@@ -71,6 +74,7 @@ class SensorContextCollector
                     proximityNear = proxDeferred.await()
                     stepsDelta = stepDeferred.await()
                 }
+                sensingMs = android.os.SystemClock.elapsedRealtime() - sensingStart
             }
 
             return ContextSnapshotEntity(
@@ -95,6 +99,8 @@ class SensorContextCollector
                 isScreenOn = isScreenOn,
                 unlockCount = unlockCount,
                 notificationsLastHour = notificationsLastHour,
+                wifiPlace = wifiPlace,
+                sensingMs = sensingMs,
             )
         }
 

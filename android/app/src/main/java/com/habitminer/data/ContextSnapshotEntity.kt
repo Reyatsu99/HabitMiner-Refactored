@@ -32,4 +32,8 @@ data class ContextSnapshotEntity(
     val isScreenOn: Boolean,
     val unlockCount: Int,
     val notificationsLastHour: Int,
+    /** Hashed ID of the connected Wi-Fi network (only when Wi-Fi places are enabled). */
+    val wifiPlace: String? = null,
+    /** How long sensors were switched on to take this snapshot. */
+    val sensingMs: Long = 0L,
 )
