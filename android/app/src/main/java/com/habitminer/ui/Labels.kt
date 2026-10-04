@@ -1,7 +1,9 @@
 package com.habitminer.ui
 
 import com.habitminer.analytics.CategoryMapper
+import com.habitminer.analytics.ContextLabels
 import com.habitminer.analytics.Format
+import com.habitminer.analytics.Motion
 import com.habitminer.data.AppUsageEntity
 import com.habitminer.data.ContextSnapshotEntity
 import java.text.SimpleDateFormat
@@ -36,18 +38,26 @@ object Labels {
                     else -> "Bright"
                 } + " (${s.lightLux.toInt()} lux)"
         }
-        if (s.accelVariance >= 0f) {
-            parts +=
-                when {
-                    s.accelVariance < 0.5f -> "Still"
-                    s.accelVariance < 2f -> "Moving"
-                    else -> "Very active"
-                }
-        }
+        motion(s)?.let { parts += it.label }
         if (parts.isEmpty()) parts += if (s.isScreenOn) "No sensor reading" else "Screen off"
+        if (s.stepsSinceLastSnapshot > 0) parts += "${s.stepsSinceLastSnapshot} steps"
         if (s.batteryLevel in 0..100) parts += "${s.batteryLevel}% battery" + if (s.isCharging) ", charging" else ""
         return parts.joinToString(" · ")
     }
+
+    /** Motion for one snapshot, combining the accelerometer with steps taken just before it. */
+    fun motion(s: ContextSnapshotEntity): Motion? = ContextLabels.motion(s.accelVariance.takeIf { it >= 0f }, s.recentSteps.takeIf { it >= 0 })
+
+    /** True when recent steps, not the accelerometer, made this snapshot "moving". */
+    fun motionFromSteps(s: ContextSnapshotEntity): Boolean =
+        ContextLabels.motionFromSteps(s.accelVariance.takeIf { it >= 0f }, s.recentSteps.takeIf { it >= 0 })
+
+    fun motionChip(m: Motion): String =
+        when (m) {
+            Motion.STILL -> "🧍 Still"
+            Motion.MOVING -> "🚶 Moving"
+            Motion.ACTIVE -> "🏃 Very active"
+        }
 
     fun age(ms: Long): String = Format.ago(System.currentTimeMillis() - ms)
 

@@ -66,7 +66,7 @@ object ContextInsights {
                     a.knownLight += s.durationMs
                     if (it == Light.DARK) a.dark += s.durationMs
                 }
-                ContextLabels.motion(sensors?.motionVariance)?.let {
+                sensors?.let { ContextLabels.motion(it) }?.let {
                     a.knownMotion += s.durationMs
                     if (it != Motion.STILL) {
                         a.moving += s.durationMs

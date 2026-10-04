@@ -11,6 +11,13 @@ interface LabelDao {
     @Insert
     suspend fun insert(label: UserLabelEntity): Long
 
+    @Insert
+    suspend fun insertAll(labels: List<UserLabelEntity>)
+
+    /** "KIND:timestamp" for every label, used to skip duplicates on import. */
+    @Query("SELECT kind || ':' || timestamp FROM user_labels")
+    suspend fun getKeys(): List<String>
+
     @Query("SELECT * FROM user_labels ORDER BY timestamp DESC")
     fun getAll(): Flow<List<UserLabelEntity>>
 

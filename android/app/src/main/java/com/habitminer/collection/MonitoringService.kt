@@ -58,6 +58,9 @@ class MonitoringService : Service() {
     @Inject
     lateinit var feedbackRepository: com.habitminer.repository.FeedbackRepository
 
+    @Inject
+    lateinit var stepCounterMonitor: StepCounterMonitor
+
     // Battery-aware sensing: the loop interval follows the current mode (5–30 min).
     @Volatile private var sensingMode: com.habitminer.analytics.SensingMode = com.habitminer.analytics.SensingMode.NORMAL
 
@@ -75,9 +78,36 @@ class MonitoringService : Service() {
                         com.habitminer.data.DeviceEventEntity(eventType = DeviceEventReceiver.EVENT_UNLOCK),
                     )
                 }
+                requestEventReading(Trigger.UNLOCK)
             }
         }
     private var unlockReceiverRegistered = false
+
+    /**
+     * Why a snapshot is being taken. Scheduled readings run every 5–30 minutes, so on their
+     * own the surroundings shown in the app could be half an hour old. Unlocking the phone
+     * and opening HabitMiner also take a reading, so they're fresh while the phone is in use.
+     */
+    private enum class Trigger(val minSensorGapMs: Long) {
+        SCHEDULE(0L),
+        UNLOCK(5 * 60_000L),
+        APP_OPEN(60_000L),
+    }
+
+    @Volatile private var eventReadingJob: Job? = null
+
+    @Volatile private var loopRunning = false
+
+    private fun requestEventReading(trigger: Trigger) {
+        if (isMonitoringPaused || eventReadingJob?.isActive == true) return
+        eventReadingJob =
+            serviceScope.launch {
+                // After an unlock, wait until the phone is actually in use before sampling.
+                if (trigger == Trigger.UNLOCK) delay(3_000L)
+                runCatching { collectContextSnapshot(trigger) }
+                    .onFailure { android.util.Log.w("HabitMiner", "Event reading failed", it) }
+            }
+    }
 
     private val serviceJob = Job()
     private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob)
@@ -98,17 +128,32 @@ class MonitoringService : Service() {
         const val ACTION_PAUSE = "com.habitminer.action.PAUSE"
         const val ACTION_RESUME = "com.habitminer.action.RESUME"
         const val ACTION_STOP = "com.habitminer.action.STOP"
+        const val ACTION_COLLECT_NOW = "com.habitminer.action.COLLECT_NOW"
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "monitoring_channel"
 
         // MutableStateFlow for reactive liveness tracking
         val isServiceRunning = MutableStateFlow(false)
+
+        /**
+         * Asks the running service for a fresh sensor reading (used when the app is opened, so
+         * "Around you" reflects right now). Does nothing if monitoring isn't running; readings
+         * are rate-limited to one a minute.
+         */
+        fun requestFreshReading(context: Context) {
+            if (!isServiceRunning.value) return
+            runCatching {
+                context.startService(Intent(context, MonitoringService::class.java).setAction(ACTION_COLLECT_NOW))
+            }
+        }
     }
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
         isServiceRunning.value = true
+        // Keep the hardware step counter listening for as long as monitoring runs.
+        stepCounterMonitor.start()
 
         try {
             ContextCompat.registerReceiver(
@@ -156,10 +201,18 @@ class MonitoringService : Service() {
                 isMonitoringPaused = false
                 updateNotification()
                 // Force an immediate collection on resume
-                serviceScope.launch { collectContextSnapshot() }
+                serviceScope.launch { collectContextSnapshot(Trigger.SCHEDULE) }
             }
             ACTION_STOP -> {
                 stopSelf()
+            }
+            ACTION_COLLECT_NOW -> {
+                // If the system had stopped us, this start also has to bring monitoring back.
+                if (!loopRunning) {
+                    promoteToForeground()
+                    startMonitoringLoop()
+                }
+                requestEventReading(Trigger.APP_OPEN)
             }
             else -> {
                 // Started by system after kill (START_STICKY resurrection) or BOOT_COMPLETED
@@ -204,11 +257,12 @@ class MonitoringService : Service() {
     private fun startMonitoringLoop() {
         // Cancel existing monitoring coroutine without cancelling the scope (CRITICAL-3 / MS-1)
         serviceJob.cancelChildren()
+        loopRunning = true
 
         serviceScope.launch {
             while (true) {
                 if (!isMonitoringPaused) {
-                    collectContextSnapshot()
+                    collectContextSnapshot(Trigger.SCHEDULE)
                 }
                 delay(sensingMode.intervalMs)
             }
@@ -235,14 +289,19 @@ class MonitoringService : Service() {
         val latest = contextRepository.getLatestSnapshotWithSensors().first()
         val recentlyMoving =
             latest?.takeIf { System.currentTimeMillis() - it.timestamp < 20 * 60 * 1000L }
-                ?.let { com.habitminer.analytics.ContextLabels.motion(it.accelVariance.takeIf { v -> v >= 0f }) }
+                ?.let {
+                    com.habitminer.analytics.ContextLabels.motion(
+                        it.accelVariance.takeIf { v -> v >= 0f },
+                        it.recentSteps.takeIf { s -> s >= 0 },
+                    )
+                }
                 ?.let { it != com.habitminer.analytics.Motion.STILL }
         val mode = com.habitminer.analytics.SensingPolicy.choose(isScreenOn, recentlyMoving, isCharging, batteryLevel)
         getSharedPreferences(PrefsKeys.PREFS_NAME, Context.MODE_PRIVATE).edit().putString(PrefsKeys.SENSING_MODE, mode.name).apply()
         return mode
     }
 
-    private suspend fun collectContextSnapshot() {
+    private suspend fun collectContextSnapshot(trigger: Trigger) {
         val preferences = getSharedPreferences(PrefsKeys.PREFS_NAME, Context.MODE_PRIVATE)
         if (!preferences.getBoolean(PrefsKeys.COLLECTION_ENABLED, true)) {
             stopSelf()
@@ -258,6 +317,13 @@ class MonitoringService : Service() {
 
         // Match DataCollectionWorker's battery guard so we don't drain battery at low charge (PERF-5)
         val shouldCollectSensors = isScreenOn && (batteryLevel >= 15 || isCharging)
+        // Unlock and app-open readings exist only to refresh the sensors, so they're skipped
+        // when sensors can't be read or a recent enough reading already exists.
+        if (trigger != Trigger.SCHEDULE &&
+            (!shouldCollectSensors || contextRepository.hasSensorReadingWithin(trigger.minSensorGapMs))
+        ) {
+            return
+        }
         sensingMode = chooseSensingMode(isScreenOn, isCharging, batteryLevel)
 
         // Query real unlock and notification counts from the event log (MS-2)
@@ -285,7 +351,14 @@ class MonitoringService : Service() {
         contextRepository.collectionMutex.withLock {
             // Skip if a snapshot was taken very recently (e.g. by the WorkManager fallback).
             val minGap = (sensingMode.intervalMs - 60_000L).coerceAtLeast(4 * 60_000L)
-            if (contextRepository.shouldSkipContextCollection(minGap)) {
+            val skip =
+                if (trigger == Trigger.SCHEDULE) {
+                    contextRepository.shouldSkipContextCollection(minGap)
+                } else {
+                    // Re-check inside the lock in case another reading just finished.
+                    contextRepository.hasSensorReadingWithin(trigger.minSensorGapMs)
+                }
+            if (skip) {
                 android.util.Log.d("HabitMiner", "Skipping context collection: recent snapshot exists")
             } else {
                 val place = wifiPlaceProvider.currentPlaceHash()

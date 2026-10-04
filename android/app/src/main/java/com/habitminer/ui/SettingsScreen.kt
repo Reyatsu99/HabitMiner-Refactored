@@ -18,6 +18,8 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Upload
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -192,9 +194,33 @@ fun SettingsScreen(
                 Text("Export Data Now")
             }
 
+            Spacer(modifier = Modifier.height(20.dp))
+            SettingsItem(
+                icon = Icons.Default.Upload,
+                title = "Import Data (ZIP)",
+                description =
+                    "Restore a ZIP made with Export, e.g. after reinstalling or on a new phone. " +
+                        "Your history is merged in without duplicates, and routines are rebuilt from it.",
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            val importLauncher =
+                rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+                    if (uri != null) viewModel.importData(uri)
+                }
+            OutlinedButton(
+                onClick = {
+                    importLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"))
+                },
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = RoundedCornerShape(12.dp),
+            ) {
+                Text("Import a previous export")
+            }
+
             if (state.exportMessage != null) {
                 LaunchedEffect(state.exportMessage) {
-                    delay(4000)
+                    // Import results are longer, so leave them up a little longer.
+                    delay(if (state.exportMessage.startsWith("Imported")) 12_000 else 4_000)
                     viewModel.clearExportMessage()
                 }
                 Text(

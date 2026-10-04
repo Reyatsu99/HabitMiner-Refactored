@@ -69,13 +69,59 @@ enum class Light(val label: String) { DARK("Dark"), DIM("Dim"), BRIGHT("Bright")
 
 /** Turns raw sensor numbers into labels; missing readings stay null instead of looking like "low". */
 object ContextLabels {
-    fun motion(variance: Float?): Motion? =
-        when {
-            variance == null || variance < 0f -> null
-            variance < 0.5f -> Motion.STILL
-            variance < 2.0f -> Motion.MOVING
-            else -> Motion.ACTIVE
-        }
+    /**
+     * Accelerometer magnitude variance (m/s²)² below this reads as still. A phone held
+     * steady or typed on stays well under it; walking while looking at the screen is above.
+     */
+    const val STILL_VARIANCE = 0.3f
+
+    /** Variance above this reads as very active (running, or a phone shaken in a pocket). */
+    const val ACTIVE_VARIANCE = 4.0f
+
+    /** How far back "recent steps" look before each reading. */
+    const val RECENT_STEPS_WINDOW_MS = 2 * TimeUtil.MINUTE
+
+    /** Steps in that window that mean walking (step counters ignore a few stray steps). */
+    const val WALKING_STEPS = 20
+
+    /** Steps in that window that mean brisk walking or running (~130+ steps a minute). */
+    const val BRISK_STEPS = 260
+
+    /**
+     * Motion from the accelerometer, the step counter, or both. Each one can only push the
+     * label up: the step counter catches walking that a short accelerometer window held in
+     * a steady hand reads as still, and the accelerometer catches movement without steps.
+     * Few or no steps without an accelerometer reading stays unknown (the phone could be
+     * in a vehicle).
+     */
+    fun motion(
+        variance: Float?,
+        recentSteps: Int? = null,
+    ): Motion? {
+        val fromAccel =
+            when {
+                variance == null || variance < 0f -> null
+                variance < STILL_VARIANCE -> Motion.STILL
+                variance < ACTIVE_VARIANCE -> Motion.MOVING
+                else -> Motion.ACTIVE
+            }
+        val fromSteps =
+            when {
+                recentSteps == null || recentSteps < 0 -> null
+                recentSteps >= BRISK_STEPS -> Motion.ACTIVE
+                recentSteps >= WALKING_STEPS -> Motion.MOVING
+                else -> null
+            }
+        return listOfNotNull(fromAccel, fromSteps).maxByOrNull { it.ordinal }
+    }
+
+    fun motion(sample: ContextSample): Motion? = motion(sample.motionVariance, sample.recentSteps)
+
+    /** True when the step counter, not the accelerometer, is what made this reading "moving". */
+    fun motionFromSteps(
+        variance: Float?,
+        recentSteps: Int?,
+    ): Boolean = motion(variance, recentSteps) != motion(variance, null)
 
     fun light(lux: Float?): Light? =
         when {

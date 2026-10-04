@@ -15,8 +15,8 @@ android {
         applicationId "com.habitminer"
         minSdk 26           // Android 8.0 — required for WorkManager background execution guarantees
         targetSdk 34
-        versionCode 3
-        versionName "1.2.0"
+        versionCode 4
+        versionName "1.2.1"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -31,7 +31,22 @@ android {
         }
     }
 
+    // One shared debug key for everyone (CI, teammates). Without it every machine and every
+    // CI run signs with a different random key, and Android refuses to install the new APK
+    // over the old one ("package conflicts with an existing package"). Debug-only, not secret.
+    signingConfigs {
+        debug {
+            storeFile file('debug.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+        }
         release {
             minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'

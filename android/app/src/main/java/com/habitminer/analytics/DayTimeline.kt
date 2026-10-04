@@ -63,7 +63,7 @@ object DayTimelineBuilder {
                     ContextMark(
                         minute = minute(it.timestamp),
                         light = ContextLabels.light(it.lightLux),
-                        motion = ContextLabels.motion(it.motionVariance),
+                        motion = ContextLabels.motion(it),
                         charging = it.isCharging,
                     )
                 }

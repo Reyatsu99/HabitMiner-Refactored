@@ -284,6 +284,7 @@ object SampleData {
                 features = FeatureSettings(),
                 sensingModeName = "NORMAL",
                 sensingMsToday = 93_000L,
+                stepsToday = 4_321L,
             )
         return Data(state, now)
     }

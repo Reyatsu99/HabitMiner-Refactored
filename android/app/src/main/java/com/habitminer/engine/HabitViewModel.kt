@@ -113,6 +113,10 @@ data class HabitUiState(
     val places: ImmutableList<com.habitminer.data.PlaceEntity> = persistentListOf(),
     val sensingModeName: String? = null,
     val sensingMsToday: Long = 0L,
+    /** Steps counted today by the hardware step counter, or -1 before the first reading. */
+    val stepsToday: Long = -1L,
+    val stepSensorAvailable: Boolean = true,
+    val stepPermission: Boolean = true,
 )
 
 @OptIn(FlowPreview::class)
@@ -135,6 +139,8 @@ class HabitViewModel
         private val insightsComputer: InsightsComputer,
         private val wifiPlaceProvider: com.habitminer.collection.WifiPlaceProvider,
         private val labelContextCapture: com.habitminer.proactive.LabelContextCapture,
+        private val importManager: com.habitminer.data.ImportManager,
+        private val stepCounterMonitor: com.habitminer.collection.StepCounterMonitor,
     ) : AndroidViewModel(application), HabitActions {
         private val _uiState = MutableStateFlow(HabitUiState(selectedHistoryDate = getStartOfDay()))
         val uiState: StateFlow<HabitUiState> = _uiState.asStateFlow()
@@ -195,6 +201,8 @@ class HabitViewModel
                         android.content.pm.PackageManager.PERMISSION_GRANTED
                 }
 
+            // Permission may have just been granted on the permission screen.
+            stepCounterMonitor.start()
             _uiState.update {
                 it.copy(
                     hasUsagePermission = hasUsage,
@@ -202,6 +210,8 @@ class HabitViewModel
                     hasRuntimePermissions = hasRuntime,
                     retentionDays = retentionDays,
                     features = readFeatureSettings(),
+                    stepSensorAvailable = stepCounterMonitor.hasSensor(),
+                    stepPermission = stepCounterMonitor.hasPermission(),
                 )
             }
 
@@ -334,6 +344,32 @@ class HabitViewModel
                 } else {
                     _uiState.update { it.copy(exportMessage = "Export failed. Please try again.") }
                 }
+            }
+        }
+
+        /**
+         * Restores a ZIP from Export (e.g. after reinstalling). Afterwards the usual sync runs,
+         * which rebuilds routines and baselines from the restored history.
+         */
+        fun importData(uri: android.net.Uri) {
+            viewModelScope.launch(Dispatchers.IO) {
+                _uiState.update { it.copy(exportMessage = "Importing your data…") }
+                val message =
+                    try {
+                        val r = importManager.importZip(uri)
+                        if (r.isEmpty) {
+                            "That file doesn't look like a HabitMiner export. Pick the .zip made by Export Data."
+                        } else {
+                            "Imported ${r.usage} app sessions, ${r.snapshots} surroundings readings, " +
+                                "${r.labels} labels and ${r.places} places. Rebuilding your routines…"
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.e("HabitMiner", "Import failed", e)
+                        "Import failed: ${e.message ?: "unreadable file"}"
+                    }
+                _uiState.update { it.copy(exportMessage = message) }
+                loadHistoricalData()
+                insightsRefresh.tryEmit(Unit)
             }
         }
 
@@ -643,6 +679,17 @@ class HabitViewModel
                                 )
                             }
                         }
+                    }
+
+                    launch {
+                        stepCounterMonitor.stepsToday.collect { steps ->
+                            _uiState.update { it.copy(stepsToday = steps) }
+                        }
+                    }
+
+                    launch {
+                        // Resets "steps today" after midnight even if no new steps arrive.
+                        startOfDayFlow.collect { stepCounterMonitor.refreshDay() }
                     }
 
                     launch {

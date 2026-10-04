@@ -36,4 +36,6 @@ data class ContextSnapshotEntity(
     val wifiPlace: String? = null,
     /** How long sensors were switched on to take this snapshot. */
     val sensingMs: Long = 0L,
+    /** Steps in the two minutes before this snapshot (-1 when the step counter wasn't available). */
+    val recentSteps: Int = -1,
 )

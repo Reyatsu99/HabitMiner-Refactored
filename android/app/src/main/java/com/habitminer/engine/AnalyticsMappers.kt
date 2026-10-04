@@ -32,6 +32,7 @@ object AnalyticsMappers {
             proximityNear = e.proximityNear,
             batteryLevel = e.batteryLevel.takeIf { it in 0..100 },
             place = e.wifiPlace,
+            recentSteps = e.recentSteps.takeIf { it >= 0 },
         )
 
     /**

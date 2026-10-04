@@ -215,7 +215,9 @@ fun HistoryScreen(
                                 ""
                             }
                         val charging = if (item.readings.any { it.isCharging }) ", charging" else ""
-                        ContextRow(range, "Screen off$battery$charging")
+                        val steps = item.readings.sumOf { it.stepsSinceLastSnapshot.coerceAtLeast(0) }
+                        val stepText = if (steps > 0) " · $steps steps" else ""
+                        ContextRow(range, "Screen off$stepText$battery$charging")
                     }
                 }
             }
