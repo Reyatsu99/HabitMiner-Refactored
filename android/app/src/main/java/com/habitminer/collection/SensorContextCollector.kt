@@ -6,24 +6,21 @@ import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.os.Handler
+import android.os.SystemClock
+import com.habitminer.analytics.ContextLabels
+import com.habitminer.analytics.MotionMath
+import com.habitminer.analytics.SignalStats
 import com.habitminer.data.ContextSnapshotEntity
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.ConcurrentLinkedQueue
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.resume
 import kotlin.math.sqrt
-
-data class MotionStats(
-    val mean: Float,
-    val variance: Float,
-    val std: Float,
-    val min: Float,
-    val max: Float,
-    val energy: Float,
-)
 
 @Singleton
 class SensorContextCollector
@@ -54,13 +51,12 @@ class SensorContextCollector
             var sensingMs = 0L
 
             var lightLux = -1f
-            var accelStats: MotionStats? = null
-            var gyroStats: MotionStats? = null
+            var accelStats: SignalStats? = null
+            var gyroStats: SignalStats? = null
             var proximityNear: Boolean? = null
-            var stepsDelta = -1
 
             if (collectSensors) {
-                val sensingStart = android.os.SystemClock.elapsedRealtime()
+                val sensingStart = SystemClock.elapsedRealtime()
                 kotlinx.coroutines.coroutineScope {
                     val lightDeferred = async { collectLightLevel() }
                     val accelDeferred = async { collectMotionState(Sensor.TYPE_ACCELEROMETER) }
@@ -72,12 +68,18 @@ class SensorContextCollector
                     gyroStats = gyroDeferred.await()
                     proximityNear = proxDeferred.await()
                 }
-                sensingMs = android.os.SystemClock.elapsedRealtime() - sensingStart
+                sensingMs = SystemClock.elapsedRealtime() - sensingStart
             }
 
             // Steps come from the always-on step counter, so they are recorded whether or not
             // the screen is on (the other sensors are only sampled with the screen on).
-            stepsDelta = collectStepDelta()
+            // Flushing first delivers steps the sensor hub is still holding in its batch.
+            var recentSteps = -1
+            if (stepCounterMonitor.hasPermission() && stepCounterMonitor.hasSensor() && stepCounterMonitor.start()) {
+                stepCounterMonitor.flush()
+                recentSteps = stepCounterMonitor.stepsInLast(ContextLabels.RECENT_STEPS_WINDOW_MS) ?: -1
+            }
+            val stepsDelta = collectStepDelta()
 
             return ContextSnapshotEntity(
                 timestamp = timestamp,
@@ -103,6 +105,7 @@ class SensorContextCollector
                 notificationsLastHour = notificationsLastHour,
                 wifiPlace = wifiPlace,
                 sensingMs = sensingMs,
+                recentSteps = recentSteps,
             )
         }
 
@@ -143,74 +146,39 @@ class SensorContextCollector
                 }
             }
 
-        private suspend fun collectMotionState(sensorType: Int): MotionStats? =
-            withTimeoutOrNull(2000L) {
-                suspendCancellableCoroutine { continuation ->
-                    val sensor = sensorManager.getDefaultSensor(sensorType)
-                    if (sensor == null) {
-                        continuation.resume(null)
-                        return@suspendCancellableCoroutine
+        /**
+         * Listens for [MOTION_WARM_UP_MS] + [MOTION_WINDOW_MS] at ~50 Hz and summarises the
+         * magnitude. The first few hundred ms are dropped because some drivers replay a cached
+         * value on registration, and a 2.5 s window spans several steps, so walking with the
+         * phone held steady still shows up (the old 12-sample burst lasted under a second).
+         */
+        private suspend fun collectMotionState(sensorType: Int): SignalStats? {
+            val sensor = sensorManager.getDefaultSensor(sensorType) ?: return null
+            val readings = ConcurrentLinkedQueue<Pair<Long, Float>>()
+            val start = SystemClock.elapsedRealtime()
+            val listener =
+                object : SensorEventListener {
+                    override fun onSensorChanged(event: SensorEvent?) {
+                        if (event?.sensor?.type != sensorType || readings.size >= MAX_MOTION_READINGS) return
+                        val x = event.values[0]
+                        val y = event.values[1]
+                        val z = event.values[2]
+                        readings.add((SystemClock.elapsedRealtime() - start) to sqrt(x * x + y * y + z * z))
                     }
 
-                    val samples = mutableListOf<Float>()
-
-                    val listener =
-                        object : SensorEventListener {
-                            override fun onSensorChanged(event: SensorEvent?) {
-                                if (event?.sensor?.type == sensorType) {
-                                    val x = event.values[0]
-                                    val y = event.values[1]
-                                    val z = event.values[2]
-                                    val magnitude = sqrt(x * x + y * y + z * z)
-                                    samples.add(magnitude)
-
-                                    if (samples.size >= 12) {
-                                        sensorManager.unregisterListener(this)
-                                        if (continuation.isActive) {
-                                            val mean = samples.average().toFloat()
-                                            var variance = 0f
-                                            for (v in samples) {
-                                                variance += (v - mean) * (v - mean)
-                                            }
-                                            variance /= samples.size
-                                            val std = sqrt(variance)
-                                            val min = samples.minOrNull() ?: 0f
-                                            val max = samples.maxOrNull() ?: 0f
-                                            val energy = samples.map { it * it }.average().toFloat()
-
-                                            val stats =
-                                                MotionStats(
-                                                    mean = mean,
-                                                    variance = variance,
-                                                    std = std,
-                                                    min = min,
-                                                    max = max,
-                                                    energy = energy,
-                                                )
-                                            continuation.resume(stats)
-                                        }
-                                    }
-                                }
-                            }
-
-                            override fun onAccuracyChanged(
-                                sensor: Sensor?,
-                                accuracy: Int,
-                            ) {}
-                        }
-
-                    // SENSOR_DELAY_UI (~60ms) is more battery-efficient than SENSOR_DELAY_GAME (20ms)
-                    // for background 15-min sampling; still collects 12 samples within 2s timeout (BP-6)
-                    val registered = sensorManager.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_UI, sensorHandler)
-                    if (!registered) {
-                        continuation.resume(null)
-                        return@suspendCancellableCoroutine
-                    }
-                    continuation.invokeOnCancellation {
-                        sensorManager.unregisterListener(listener)
-                    }
+                    override fun onAccuracyChanged(
+                        sensor: Sensor?,
+                        accuracy: Int,
+                    ) {}
                 }
+            if (!sensorManager.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_GAME, sensorHandler)) return null
+            try {
+                delay(MOTION_WARM_UP_MS + MOTION_WINDOW_MS)
+            } finally {
+                sensorManager.unregisterListener(listener)
             }
+            return MotionMath.stats(readings.toList(), MOTION_WARM_UP_MS, rejectConstant = sensorType == Sensor.TYPE_ACCELEROMETER)
+        }
 
         private suspend fun collectProximityState(): Boolean? =
             withTimeoutOrNull(2000L) {
@@ -290,5 +258,11 @@ class SensorContextCollector
             if (counter == null) return -1
             stepCounterMonitor.record(counter)
             return stepCounterMonitor.takeDeltaSinceLastSnapshot() ?: -1
+        }
+
+        companion object {
+            private const val MOTION_WARM_UP_MS = 300L
+            private const val MOTION_WINDOW_MS = 2_500L
+            private const val MAX_MOTION_READINGS = 400
         }
     }

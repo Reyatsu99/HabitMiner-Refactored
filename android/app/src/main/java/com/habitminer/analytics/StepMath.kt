@@ -50,4 +50,95 @@ object StepMath {
         }
         return state.copy(last = counter)
     }
+
+    /** One step-counter report: when the steps happened (device uptime, ms) and the counter value. */
+    data class StepPoint(
+        val atMs: Long,
+        val counter: Long,
+    )
+
+    /**
+     * Steps taken in the [windowMs] before [nowMs], from the counter reports in [points].
+     *
+     * The counter only reports when steps happen, so no report inside the window means no
+     * steps. Without a report from before the window, the first report inside it can't be
+     * attributed (its steps may be older), so the result is a lower bound. Returns null when
+     * there are no reports at all.
+     */
+    fun stepsInWindow(
+        points: List<StepPoint>,
+        nowMs: Long,
+        windowMs: Long,
+    ): Int? {
+        if (points.isEmpty()) return null
+        val sorted = points.sortedBy { it.atMs }
+        val start = nowMs - windowMs
+        val inWindow = sorted.filter { it.atMs > start && it.atMs <= nowMs }
+        if (inWindow.isEmpty()) return 0
+        val baseline = sorted.lastOrNull { it.atMs <= start }
+        val chain = listOfNotNull(baseline) + inWindow
+        var steps = 0L
+        for (i in 1 until chain.size) steps += delta(chain[i - 1].counter, chain[i].counter)
+        return steps.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+    }
+
+    /** Drops reports older than [keepMs], keeping the newest older one as a baseline. */
+    fun trim(
+        points: List<StepPoint>,
+        nowMs: Long,
+        keepMs: Long,
+    ): List<StepPoint> {
+        val sorted = points.sortedBy { it.atMs }
+        val cutoff = nowMs - keepMs
+        val recent = sorted.filter { it.atMs > cutoff }
+        val baseline = sorted.lastOrNull { it.atMs <= cutoff }
+        return listOfNotNull(baseline) + recent
+    }
+}
+
+/** Summary statistics of a sensor's magnitude over a short window. */
+data class SignalStats(
+    val mean: Float,
+    val variance: Float,
+    val std: Float,
+    val min: Float,
+    val max: Float,
+    val energy: Float,
+    val count: Int,
+)
+
+object MotionMath {
+    /** Minimum readings after the warm-up for the window to count. */
+    const val MIN_READINGS = 8
+
+    /**
+     * Statistics over (msSinceRegistration, magnitude) readings, ignoring the first [warmUpMs].
+     *
+     * Some sensor drivers first replay the last cached value (or several copies of it) when a
+     * listener registers, which made a phone that was moving look perfectly still. Returns
+     * null when too few readings remain, or (with [rejectConstant]) when every reading is
+     * identical: an accelerometer always shows some noise, so that means the driver only
+     * replayed a stale value rather than measuring. Gyroscopes can legitimately report a flat
+     * zero on a table, so they pass false.
+     */
+    fun stats(
+        readings: List<Pair<Long, Float>>,
+        warmUpMs: Long,
+        rejectConstant: Boolean = true,
+    ): SignalStats? {
+        val values = readings.filter { it.first >= warmUpMs }.map { it.second }
+        if (values.size < MIN_READINGS) return null
+        if (rejectConstant && values.distinct().size == 1) return null
+        val mean = values.average()
+        val variance = values.sumOf { (it - mean) * (it - mean) } / values.size
+        return SignalStats(
+            mean = mean.toFloat(),
+            variance = variance.toFloat(),
+            std = kotlin.math.sqrt(variance).toFloat(),
+            min = values.min(),
+            max = values.max(),
+            energy = values.map { it.toDouble() * it }.average().toFloat(),
+            count = values.size,
+        )
+    }
 }

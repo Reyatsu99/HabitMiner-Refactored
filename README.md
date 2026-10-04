@@ -5,7 +5,7 @@
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)  
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.0-purple.svg)](https://kotlinlang.org/)  
 [![Android](https://img.shields.io/badge/Platform-Android-green.svg)](https://developer.android.com/)
-[![Version](https://img.shields.io/badge/Version-1.2.0-blue.svg)](https://github.com/Reyatsu99/HabitMiner-Refactored/releases)
+[![Version](https://img.shields.io/badge/Version-1.2.1-blue.svg)](https://github.com/Reyatsu99/HabitMiner-Refactored/releases)
 
 ---
 
@@ -114,7 +114,8 @@ The on-device **HabitEngine** aggregates this data to build temporal baselines (
 - **Sleep & wake estimate**: the longest overnight stretch with the screen off, with confidence raised by charging and darkness. Also reports phone use in the hour before sleep and how much of it was in the dark.
 - **Pickup triggers**: each unlock is classified as notification-driven (a notification arrived within 2 minutes) or self-initiated, with quick checks (<30 s) counted separately.
 - **Context-tagged insights**: app sessions are joined with the nearest sensor reading, e.g. "45% of your Evony time is in the dark" or "used your phone while on the move 18 times".
-- **Battery-aware sensing**: the sampling interval adapts (5 min when moving with the screen on, 15 min normally, 30 min when idle). Health shows how long sensors were on today.
+- **Battery-aware sensing**: the sampling interval adapts (5 min when moving with the screen on, 15 min normally, 30 min when idle). Unlocking the phone or opening the app also takes a reading, so "Around you" is current while the phone is in use. Health shows how long sensors were on today.
+- **Motion from two sensors**: a 2.5 s accelerometer window (first 300 ms dropped, since some drivers replay a stale value) is combined with the step counter's last two minutes, so walking with the phone held steady still reads as moving.
 - **Wi-Fi places (opt-in)**: screen time per place (Home / Campus / named by you), stored only as a salted hash of the access point.
 
 **Analytics views**

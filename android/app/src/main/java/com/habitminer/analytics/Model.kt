@@ -28,6 +28,8 @@ data class ContextSample(
     val proximityNear: Boolean?,
     val batteryLevel: Int?,
     val place: String? = null,
+    /** Steps in the two minutes before the reading, or null when the step counter wasn't available. */
+    val recentSteps: Int? = null,
 )
 
 /** A notification or unlock event. */

@@ -124,6 +124,7 @@ class ImportManager
                             notificationsLastHour = r["notificationsLastHour"]?.toIntOrNull() ?: -1,
                             wifiPlace = r["wifiPlace"]?.ifEmpty { null },
                             sensingMs = r["sensingMs"]?.toLongOrNull() ?: 0L,
+                            recentSteps = r["recentSteps"]?.toIntOrNull() ?: -1,
                         )
                     }.getOrNull()
                 }

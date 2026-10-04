@@ -45,6 +45,7 @@ class LabelContextCapture
                         "lastAppEnd" to lastUsage?.endTime,
                         "lightLux" to snapshot?.lightLux,
                         "accelVariance" to snapshot?.accelVariance,
+                        "recentSteps" to snapshot?.recentSteps,
                         "sensorAgeMs" to snapshot?.let { now - it.timestamp },
                         "charging" to any?.isCharging,
                         "battery" to any?.batteryLevel,

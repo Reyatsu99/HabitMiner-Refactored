@@ -31,6 +31,12 @@ class ContextRepository
             return latest != null && (System.currentTimeMillis() - latest.timestamp) < minGapMs
         }
 
+        /** True when a snapshot with sensor readings was taken less than [maxAgeMs] ago. */
+        suspend fun hasSensorReadingWithin(maxAgeMs: Long): Boolean {
+            val latest = contextDao.getLatestSnapshotWithSensors().firstOrNull()
+            return latest != null && (System.currentTimeMillis() - latest.timestamp) < maxAgeMs
+        }
+
         fun getLatestSnapshot(): Flow<ContextSnapshotEntity?> = contextDao.getLatestSnapshot()
 
         fun getLatestSnapshotWithSensors(): Flow<ContextSnapshotEntity?> = contextDao.getLatestSnapshotWithSensors()

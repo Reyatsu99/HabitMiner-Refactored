@@ -238,6 +238,9 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         viewModel.checkPermissions()
         viewModel.refreshInsights()
+        // Take a fresh sensor reading so "Around you" reflects right now, not the last
+        // scheduled reading (which can be up to 30 minutes old).
+        com.habitminer.collection.MonitoringService.requestFreshReading(this)
     }
 
     override fun onNewIntent(intent: Intent) {

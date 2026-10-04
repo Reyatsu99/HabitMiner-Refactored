@@ -381,3 +381,95 @@ class StepMathTest {
         assertEquals(12L, StepMath.delta(530, 12))
     }
 }
+
+class MotionFusionTest {
+    @Test
+    fun `steps lift a steady-hand accelerometer reading to moving`() {
+        // Walking while holding the phone steady: low variance, but the step counter saw walking.
+        assertEquals(Motion.STILL, ContextLabels.motion(0.1f, 0))
+        assertEquals(Motion.MOVING, ContextLabels.motion(0.1f, 90))
+        assertEquals(Motion.ACTIVE, ContextLabels.motion(0.1f, 320))
+        assertTrue(ContextLabels.motionFromSteps(0.1f, 90))
+        assertFalse(ContextLabels.motionFromSteps(1.5f, 90))
+    }
+
+    @Test
+    fun `steps never pull the accelerometer down, and few steps alone stay unknown`() {
+        assertEquals(Motion.ACTIVE, ContextLabels.motion(6f, 30))
+        assertEquals(Motion.MOVING, ContextLabels.motion(1f, null))
+        assertNull(ContextLabels.motion(null, 5))
+        assertNull(ContextLabels.motion(null, -1))
+        assertEquals(Motion.MOVING, ContextLabels.motion(null, 60))
+    }
+
+    @Test
+    fun `sample overload uses recent steps`() {
+        val s = ContextSample(0L, 50f, 0.05f, false, true, null, 80, recentSteps = 150)
+        assertEquals(Motion.MOVING, ContextLabels.motion(s))
+    }
+}
+
+class RecentStepsTest {
+    private fun p(
+        at: Long,
+        c: Long,
+    ) = StepMath.StepPoint(at, c)
+
+    @Test
+    fun `counts steps inside the window from the last report before it`() {
+        val pts = listOf(p(0, 1_000), p(60_000, 1_040), p(150_000, 1_100), p(200_000, 1_180))
+        // Window (80s, 200s]: baseline is the 60s report (1 040) -> 140 steps.
+        assertEquals(140, StepMath.stepsInWindow(pts, 200_000, 120_000))
+    }
+
+    @Test
+    fun `no reports in the window means no steps, no reports at all means unknown`() {
+        val pts = listOf(p(0, 1_000), p(10_000, 1_030))
+        assertEquals(0, StepMath.stepsInWindow(pts, 500_000, 120_000))
+        assertNull(StepMath.stepsInWindow(emptyList(), 500_000, 120_000))
+    }
+
+    @Test
+    fun `without a baseline only steps between reports in the window count`() {
+        val pts = listOf(p(400_000, 5_000), p(430_000, 5_060))
+        assertEquals(60, StepMath.stepsInWindow(pts, 450_000, 120_000))
+    }
+
+    @Test
+    fun `a reboot inside the window is handled`() {
+        val pts = listOf(p(0, 9_000), p(100_000, 9_050), p(150_000, 20))
+        assertEquals(70, StepMath.stepsInWindow(pts, 160_000, 120_000))
+    }
+
+    @Test
+    fun `trim keeps one baseline before the cutoff`() {
+        val pts = listOf(p(0, 1), p(10, 2), p(900_000, 3), p(1_000_000, 4))
+        val kept = StepMath.trim(pts, 1_000_000, 600_000)
+        assertEquals(listOf(p(10, 2), p(900_000, 3), p(1_000_000, 4)), kept)
+    }
+}
+
+class MotionMathTest {
+    @Test
+    fun `drops warm-up readings that replay a cached value`() {
+        // A replayed resting value for 300 ms, then real walking oscillation.
+        val warm = (0 until 15).map { (it * 20L) to 9.81f }
+        val walk = (0 until 100).map { (300L + it * 20L) to (9.81f + 2f * kotlin.math.sin(it * 0.6f)) }
+        val stats = MotionMath.stats(warm + walk, warmUpMs = 300)!!
+        assertEquals(100, stats.count)
+        assertEquals(Motion.MOVING, ContextLabels.motion(stats.variance))
+    }
+
+    @Test
+    fun `identical accelerometer readings are rejected but a flat gyro is allowed`() {
+        val flat = (0 until 50).map { (400L + it * 20L) to 9.81f }
+        assertNull(MotionMath.stats(flat, warmUpMs = 300))
+        assertNotNull(MotionMath.stats(flat.map { it.first to 0f }, warmUpMs = 300, rejectConstant = false))
+    }
+
+    @Test
+    fun `too few readings after warm-up give no result`() {
+        val few = (0 until 5).map { (400L + it * 20L) to (9.8f + it * 0.1f) }
+        assertNull(MotionMath.stats(few, warmUpMs = 300))
+    }
+}

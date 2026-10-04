@@ -18,7 +18,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         UserLabelEntity::class,
         PlaceEntity::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -50,7 +50,7 @@ abstract class AppDatabase : RoomDatabase() {
                         AppDatabase::class.java,
                         "habitminer_database",
                     )
-                        .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+                        .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
                         .build()
                 instance = newInstance
                 newInstance
@@ -201,6 +201,14 @@ abstract class AppDatabase : RoomDatabase() {
                             "firstSeen INTEGER NOT NULL, " +
                             "lastSeen INTEGER NOT NULL)",
                     )
+                }
+            }
+
+        /** v8: steps in the two minutes before each reading, used to tell walking from still. */
+        internal val MIGRATION_7_8 =
+            object : Migration(7, 8) {
+                override fun migrate(database: SupportSQLiteDatabase) {
+                    database.execSQL("ALTER TABLE context_snapshots ADD COLUMN recentSteps INTEGER NOT NULL DEFAULT -1")
                 }
             }
     }

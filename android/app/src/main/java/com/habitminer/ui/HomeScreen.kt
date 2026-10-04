@@ -491,7 +491,7 @@ fun ContextNowCard(state: HabitUiState) {
         CardHeader("Around you", Icons.Default.Sensors, trailing = sensors?.let { "sensors ${Labels.age(it.timestamp)}" })
         Spacer(modifier = Modifier.height(10.dp))
         if (sensors == null && latest == null) {
-            Hint("No readings yet. Sensors are read every 5–30 minutes while the screen is on.")
+            Hint("No readings yet. Light and motion are read when you unlock your phone or open HabitMiner.")
             return@SurfaceCard
         }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -505,16 +505,9 @@ fun ContextNowCard(state: HabitUiState) {
                         }
                     ContextChip(light)
                 }
-                if (s.accelVariance >= 0f) {
-                    ContextChip(
-                        when {
-                            s.accelVariance < 0.5f -> "🧍 Still"
-                            s.accelVariance < 2f -> "🚶 Moving"
-                            else -> "🏃 Very active"
-                        },
-                    )
-                }
-                s.proximityNear?.let { ContextChip(if (it) "📱 Covered / in pocket" else "📱 In hand or on a surface") }
+                Labels.motion(s)?.let { ContextChip(Labels.motionChip(it)) }
+                // Proximity isn't shown: readings are taken with the screen on, when the sensor
+                // is almost always uncovered, so it never told you anything.
             }
             when {
                 state.stepsToday >= 0 -> ContextChip("👣 ${"%,d".format(state.stepsToday)} steps today")
@@ -528,7 +521,7 @@ fun ContextNowCard(state: HabitUiState) {
         }
         if (sensors == null) {
             Spacer(modifier = Modifier.height(8.dp))
-            Hint("Light and motion are only read while the screen is on, so they appear after you next use your phone.")
+            Hint("Light and motion are read while the screen is on, so they appear after you next unlock your phone.")
         }
     }
 }
