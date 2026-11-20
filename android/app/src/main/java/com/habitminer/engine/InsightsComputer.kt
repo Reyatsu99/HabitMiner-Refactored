@@ -6,7 +6,16 @@ import com.habitminer.analytics.ContextInsight
 import com.habitminer.analytics.ContextInsights
 import com.habitminer.analytics.ContextSample
 import com.habitminer.analytics.DayTypeClusterer
+import com.habitminer.analytics.DailySleep
 import com.habitminer.analytics.DayTypes
+import com.habitminer.analytics.DeviationReport
+import com.habitminer.analytics.GuessRecord
+import com.habitminer.analytics.LabelledPeriod
+import com.habitminer.analytics.NapCandidate
+import com.habitminer.analytics.NextAppModel
+import com.habitminer.analytics.NightSignals
+import com.habitminer.analytics.NotificationEvent
+import com.habitminer.analytics.SleepCorrections
 import com.habitminer.analytics.Heatmap
 import com.habitminer.analytics.HeatmapData
 import com.habitminer.analytics.PatternGroup
@@ -16,10 +25,11 @@ import com.habitminer.analytics.PickupAnalyzer
 import com.habitminer.analytics.PickupStats
 import com.habitminer.analytics.PlaceInference
 import com.habitminer.analytics.PlaceUsage
-import com.habitminer.analytics.PredictabilityEvaluator
 import com.habitminer.analytics.PredictabilityResult
 import com.habitminer.analytics.SessionGrouper
+import com.habitminer.analytics.SleepDays
 import com.habitminer.analytics.SleepDetector
+import com.habitminer.analytics.SleepWeek
 import com.habitminer.analytics.SleepEstimate
 import com.habitminer.analytics.SleepSummary
 import com.habitminer.analytics.TimeUtil
@@ -30,11 +40,12 @@ import com.habitminer.analytics.UsageSession
 import com.habitminer.analytics.WeekComparer
 import com.habitminer.analytics.WeekComparison
 import com.habitminer.collection.DeviceEventReceiver
-import com.habitminer.collection.UsageDataCollector
+import com.habitminer.collection.DeviceEvents
 import com.habitminer.data.AppUsageEntity
 import com.habitminer.data.ContextSnapshotEntity
 import com.habitminer.data.DiscoveredHabitEntity
 import com.habitminer.data.PlaceEntity
+import com.habitminer.data.UserLabelEntity
 import com.habitminer.domain.AppIdentityResolver
 import com.habitminer.repository.ContextRepository
 import java.time.ZoneId
@@ -59,7 +70,41 @@ data class InsightsBundle(
     val placeUsage: List<PlaceUsage>,
     /** Display name for each place hash: the user's label or a suggestion. */
     val placeNames: Map<String, String>,
+    // ---- v1.3 ----
+    /** Differences from your usual days (last week + today so far) and any multi-day change. */
+    val deviations: DeviationReport = DeviationReport(emptyList(), null),
+    /** Likely naps yesterday and today you haven't answered yet, oldest first. */
+    val naps: List<NapCandidate> = emptyList(),
+    /** Naps you confirmed or added (and Health Connect's), (start, end). */
+    val confirmedNaps: List<Pair<Long, Long>> = emptyList(),
+    /** The same naps with the answers behind them, to edit or remove them. */
+    val napRecords: List<com.habitminer.analytics.RecordedNap> = emptyList(),
+    /** Nap and routine-change answers by key. */
+    val answers: Map<String, String> = emptyMap(),
+    /** Periods you labelled (exams…), left out of "usual". */
+    val periods: List<LabelledPeriod> = emptyList(),
+    /** What the next-app model guessed before your latest app switches, newest first. */
+    val recentGuesses: List<GuessRecord> = emptyList(),
+    /** Every switch in the test window with the model's guesses, oldest first (for export). */
+    val testedGuesses: List<GuessRecord> = emptyList(),
+    /** When guessing accuracy shifted sharply, a sign your routine changed. */
+    val predictionDriftAt: Long? = null,
+    /** Night + confirmed naps for each of the last 7 days (by the day you woke up), oldest first. */
+    val sleepDays: List<DailySleep> = emptyList(),
+    val sleepWeek: SleepWeek? = null,
+    /** How your corrected nights shift the other estimates, once there are enough of them. */
+    val sleepShift: SleepCorrections.Shift? = null,
+    /** The insight of the day, or null when nothing stands out (or insights are off). */
+    val insight: com.habitminer.repository.TodayInsight? = null,
+    /** Share of each day's waking hours with data (not shut down or paused), last 30 days. */
+    val coverage: Map<java.time.LocalDate, Float> = emptyMap(),
+    /** How your mood answers move with recent phone time. */
+    val mood: com.habitminer.analytics.MoodPattern? = null,
+    /** Pickups on a usual day (median of recent days), for Today's ring. */
+    val usualPickups: Int? = null,
 ) {
+    /** Today's sleep: the night that ended this morning plus today's confirmed naps. */
+    val sleepToday: DailySleep? get() = sleepDays.lastOrNull()?.takeIf { it.date == java.time.Instant.ofEpochMilli(computedAt).atZone(ZoneId.systemDefault()).toLocalDate() }
     /** The night that ended this morning, if detected. */
     val lastNight: SleepEstimate? get() = sleepNights.lastOrNull()
 }
@@ -69,14 +114,17 @@ class InsightsComputer
     @Inject
     constructor(
         private val appIdentityResolver: AppIdentityResolver,
-        private val usageDataCollector: UsageDataCollector,
         private val contextRepository: ContextRepository,
+        private val routineAnalysis: RoutineAnalysis,
+        private val calendarBusy: com.habitminer.sources.CalendarBusy,
+        private val insightRepository: com.habitminer.repository.InsightRepository,
     ) {
         suspend fun compute(
             allUsage: List<AppUsageEntity>,
             snapshots: List<ContextSnapshotEntity>,
             habits: List<DiscoveredHabitEntity>,
             places: List<PlaceEntity>,
+            labels: List<UserLabelEntity> = emptyList(),
             now: Long = System.currentTimeMillis(),
             zone: ZoneId = ZoneId.systemDefault(),
         ): InsightsBundle {
@@ -93,13 +141,15 @@ class InsightsComputer
             val samples: List<ContextSample> =
                 snapshots.asSequence().filter { it.timestamp >= horizon }.map(AnalyticsMappers::sample).toList()
 
-            val eventHorizon = now - 8 * TimeUtil.DAY
-            val unlocks =
-                runCatching { usageDataCollector.getUnlockTimesSince(eventHorizon) }.getOrNull()
-                    ?: contextRepository.getDeviceEventsSince(DeviceEventReceiver.EVENT_UNLOCK, eventHorizon).map { it.timestamp }
+            // Unlocks over the whole window, so older nights and "usual" days count them too.
+            val unlocks = contextRepository.unlockTimesSince(horizon)
+            // Notifications over the whole window: the next-app model learns how often you open
+            // an app right after it notifies you.
+            val notificationEvents =
+                contextRepository.getDeviceEventsSince(DeviceEventReceiver.EVENT_NOTIFICATION, horizon)
+                    .mapNotNull { e -> e.packageName?.let { NotificationEvent(e.timestamp, it) } }
             val notifications =
-                contextRepository.getDeviceEventsSince(DeviceEventReceiver.EVENT_NOTIFICATION, todayStart)
-                    .map { TimedEvent(it.timestamp, it.packageName) }
+                notificationEvents.filter { it.time >= todayStart }.map { TimedEvent(it.time, it.packageName) }
 
             // Same rule as the headline screen-time number: sessions that started today.
             val todaySessions = sessions.filter { it.start >= todayStart }
@@ -107,7 +157,44 @@ class InsightsComputer
             val weekSessions = sessions.filter { it.start >= weekStart }
             val weekSamples = samples.filter { it.timestamp >= weekStart }
 
-            val nights = SleepDetector.detectRange(sessions, unlocks, samples, today, 7, now, zone)
+            val stateEvents =
+                contextRepository.getDeviceEventsOfTypesSince(
+                    listOf(DeviceEvents.SCREEN_ON, DeviceEvents.DND, DeviceEvents.NEXT_ALARM, DeviceEvents.ALARM_RING, DeviceEvents.ACTIVITY),
+                    horizon,
+                )
+            val signals =
+                NightSignals.from(
+                    screenOn = stateEvents.filter { it.eventType == DeviceEvents.SCREEN_ON }.map { it.timestamp },
+                    unlocks = unlocks,
+                    notifications = notificationEvents.map { it.time },
+                    quietModes =
+                        stateEvents.filter { it.eventType == DeviceEvents.DND }.mapNotNull { e ->
+                            DeviceEvents.detailValue(e.detail, "mode")?.let { e.timestamp to (it != "off") }
+                        },
+                    nextAlarms =
+                        stateEvents.filter { it.eventType == DeviceEvents.NEXT_ALARM }.map { e ->
+                            e.timestamp to DeviceEvents.detailValue(e.detail, "at")?.toLongOrNull()
+                        },
+                    now = now,
+                    // Alarm screens over the lock screen: logged when they stop, with their start.
+                    rings =
+                        stateEvents.filter { it.eventType == DeviceEvents.ALARM_RING }.map { e ->
+                            (DeviceEvents.detailValue(e.detail, "start")?.toLongOrNull() ?: e.timestamp) to e.timestamp
+                        },
+                )
+            // Activity recognition (walking, in a vehicle…) for "on the go", when it's on.
+            val activities =
+                stateEvents.filter { it.eventType == DeviceEvents.ACTIVITY && it.timestamp >= weekStart - 2 * TimeUtil.HOUR }
+                    .mapNotNull { e -> DeviceEvents.detailValue(e.detail, "type")?.let { e.timestamp to it } }
+            // Busy times from the calendar (opt-in) for the two days naps are looked for in.
+            val busy = calendarBusy.busy(TimeUtil.startOfDay(today.minusDays(1), zone), now)
+            val routine = routineAnalysis.run(sessions, samples, unlocks, labels, places, now, zone, signals, busy)
+            val nights = routine.nights.takeLast(7)
+            val excluded =
+                routine.periods.flatMap { p -> generateSequence(p.from) { it.plusDays(1) }.takeWhile { !it.isAfter(p.to) }.toList() }.toSet()
+            val situations = contextRepository.situationSpans(horizon, now)
+            val guesses = NextAppModel.evaluate(sessions, now, zone, notifications = notificationEvents, situations = situations)
+            val sleepDays = SleepDays.build(routine.nights, routine.confirmedNaps, today, 7, zone)
 
             val pickups =
                 if (unlocks.isEmpty()) {
@@ -125,21 +212,74 @@ class InsightsComputer
                     PatternRow(it.patternDescription, it.timeSlot, it.dayType, it.occurrenceCount, it.confidence, it.lastSeenAt)
                 }
 
+            val patternGroups = PatternGrouper.group(patternRows)
+            val week = WeekComparer.compare(sessions, today, zone)
+
+            // Insight of the day: only on well-recorded days, only when something stands out.
+            val gapEvents =
+                contextRepository.getDeviceEventsOfTypesSince(
+                    listOf(DeviceEvents.SHUTDOWN, DeviceEvents.STARTUP, DeviceEvents.PAUSED, DeviceEvents.RESUMED),
+                    horizon,
+                ).map { it.timestamp to (it.eventType == DeviceEvents.SHUTDOWN || it.eventType == DeviceEvents.PAUSED) }
+            val coverage =
+                com.habitminer.analytics.DayCoverage.compute(
+                    com.habitminer.analytics.DayCoverage.gaps(gapEvents, now),
+                    (0L..29L).map { today.minusDays(it) },
+                    now,
+                    zone,
+                )
+            val candidates =
+                com.habitminer.analytics.InsightEngine.candidates(
+                    report = routine.deviations,
+                    sessions = sessions,
+                    unlocks = unlocks,
+                    nights = routine.nights,
+                    naps = routine.confirmedNaps,
+                    patterns = patternGroups,
+                    week = week,
+                    driftAt = guesses.driftAt,
+                    coverage = coverage,
+                    today = today,
+                    now = now,
+                    zone = zone,
+                )
+            val insight = runCatching { insightRepository.todaysInsight(candidates, today, now) }.getOrNull()
+
             return InsightsBundle(
                 computedAt = now,
                 todayByCategory = SessionGrouper.byCategory(todaySessions),
                 sleepNights = nights,
                 sleepSummary = SleepDetector.summarize(nights, zone),
                 pickupsToday = pickups,
-                contextInsights = ContextInsights.compute(weekSessions, weekSamples, zone),
+                usualPickups = PickupAnalyzer.usualPerDay(unlocks, today, zone, excluded = excluded),
+                contextInsights = ContextInsights.compute(weekSessions, weekSamples, zone, activities = activities),
                 heatmap = Heatmap.build(sessions, today, zone),
-                typicalDay = TypicalDay.build(sessions, today, now, zone),
+                typicalDay = TypicalDay.build(sessions, today, now, zone, excluded),
                 dayTypes = DayTypeClusterer.cluster(sessions, today, zone),
-                week = WeekComparer.compare(sessions, today, zone),
-                predictability = PredictabilityEvaluator.evaluate(sessions, now, zone),
-                patternGroups = PatternGrouper.group(patternRows),
+                week = week,
+                predictability = guesses.result,
+                patternGroups = patternGroups,
                 placeUsage = ContextInsights.byPlace(weekSessions, weekSamples, zone) { placeNames[it] ?: "Unnamed place" },
                 placeNames = placeNames,
+                deviations = routine.deviations,
+                naps = routine.naps,
+                confirmedNaps = routine.confirmedNaps,
+                napRecords = routine.napRecords,
+                answers = routine.answers,
+                periods = routine.periods,
+                recentGuesses = guesses.recent,
+                testedGuesses = guesses.tested,
+                predictionDriftAt = guesses.driftAt,
+                sleepDays = sleepDays,
+                sleepWeek = SleepDays.summarize(sleepDays, zone),
+                sleepShift = routine.sleepShift,
+                insight = insight,
+                coverage = coverage,
+                mood =
+                    com.habitminer.analytics.MoodPatterns.compute(
+                        labels.filter { it.kind == UserLabelEntity.KIND_MOOD }.mapNotNull { com.habitminer.analytics.MoodPatterns.parse(it.timestamp, it.value) },
+                        sessions,
+                    ),
             )
         }
 

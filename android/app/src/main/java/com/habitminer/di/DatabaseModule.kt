@@ -51,4 +51,13 @@ object DatabaseModule {
 
     @Provides
     fun providePlaceDao(database: AppDatabase): PlaceDao = database.placeDao()
+
+    @Provides
+    fun provideBatchDao(database: AppDatabase): com.habitminer.data.BatchDao = database.batchDao()
+
+    @Provides
+    fun provideInsightLogDao(database: AppDatabase): com.habitminer.data.InsightLogDao = database.insightLogDao()
+
+    @Provides
+    fun provideSelfHealthDao(database: AppDatabase): com.habitminer.data.SelfHealthDao = database.selfHealthDao()
 }

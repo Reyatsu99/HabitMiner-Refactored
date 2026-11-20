@@ -11,6 +11,7 @@ object PrefsKeys {
     const val CHECKINS_ENABLED = "checkins_enabled"
     const val NUDGES_ENABLED = "nudges_enabled"
     const val DIGEST_ENABLED = "digest_enabled"
+    const val DEVIATION_ALERTS_ENABLED = "deviation_alerts_enabled"
     const val PLACES_ENABLED = "places_enabled"
 
     // Bookkeeping for prompts and places
@@ -18,4 +19,99 @@ object PrefsKeys {
     const val LAST_DIGEST_AT = "last_digest_at"
     const val PLACE_SALT = "place_salt"
     const val SENSING_MODE = "sensing_mode"
+
+    // Extended
+    /** Monitoring paused from the notification or Settings; survives the service restarting. */
+    const val MONITORING_PAUSED = "monitoring_paused"
+    const val LAST_PRUNE_DAY = "last_prune_day"
+
+    /** A timed pause ends at this time (epoch ms); -1 = until resumed. */
+    const val PAUSED_UNTIL = "paused_until"
+
+    /** Break mode: first and last day (yyyy-MM-dd), and the break whose welcome-back was shown. */
+    const val BREAK_FROM = "break_from"
+    const val BREAK_UNTIL = "break_until"
+    const val WELCOME_BACK_SHOWN = "welcome_back_shown"
+
+    /** Mindful pause (off by default), its length in seconds, and a focus session's end. */
+    const val MINDFUL_ENABLED = "mindful_enabled"
+    const val MINDFUL_SECONDS = "mindful_seconds"
+    const val FOCUS_UNTIL = "focus_until"
+
+    /** Per-source switches (all on by default). */
+    const val SOURCE_LIGHT = "source_light"
+    const val SOURCE_MOTION = "source_motion"
+    const val SOURCE_STEPS = "source_steps"
+    const val SOURCE_NOTIFICATIONS = "source_notifications"
+    const val SOURCE_PHONE_STATE = "source_phone_state"
+
+    /** Salt for hashed device IDs (headphones), separate from the places salt. */
+    const val ID_SALT = "id_salt"
+
+    /** The headphones and speakers connected when last checked, as stored details. */
+    const val AUDIO_DEVICES = "audio_devices"
+
+    /** Sleep sessions from Health Connect (opt-in). */
+    const val HEALTH_CONNECT_ENABLED = "health_connect_enabled"
+    const val HEALTH_CONNECT_SYNCED_AT = "health_connect_synced_at"
+
+    /** Busy times from the calendar (opt-in). */
+    const val CALENDAR_ENABLED = "calendar_enabled"
+
+    /** The Quick Settings tile was offered once. */
+    const val TILE_OFFERED = "tile_offered"
+
+    /** Notification access was skipped during setup. */
+    const val NOTIFICATION_ACCESS_SKIPPED = "notification_access_skipped"
+
+    /** "Allow notifications?" on Today was dismissed. */
+    const val NOTIFICATION_ASK_DISMISSED = "notification_ask_dismissed"
+
+    // Insights and quiet hours
+    const val INSIGHT_FREQUENCY = "insight_frequency"
+    const val INSIGHT_FAMILIES_OFF = "insight_families_off"
+    const val INSIGHT_WINDOW_START = "insight_window_start"
+    const val INSIGHT_WINDOW_END = "insight_window_end"
+    const val INSIGHT_EXPLAINER_SEEN = "insight_explainer_seen"
+    const val QUIET_START = "quiet_start_minute"
+    const val QUIET_END = "quiet_end_minute"
+
+    /** Prefix for "reminders sent for the current stretch in this app" ("<day>@<stretch start>|<count>"). */
+    const val GOAL_REMINDED_PREFIX = "goal_reminded_"
+
+    /** The day the daily-target reminder last went out. */
+    const val GOAL_TARGET_REMINDED = "goal_target_reminded"
+
+    /** Prefix for "reminders for this app snoozed until" (epoch ms). */
+    const val GOAL_SNOOZE_PREFIX = "goal_snooze_"
+
+    /** Prefix for the last stored detail of a state event type (DND, next alarm, time zone). */
+    const val LAST_EVENT_PREFIX = "last_event_"
+    /** Export hides app names: packages become short salted hashes, and place names are left out. */
+    const val EXPORT_PRIVATE = "export_private"
+    // App updates (checked against GitHub releases).
+    const val UPDATE_CHECK_ENABLED = "update_check_enabled"
+    const val UPDATE_LAST_CHECK = "update_last_check"
+    const val UPDATE_NOT_BEFORE = "update_not_before"
+    const val UPDATE_FAILURES = "update_failures"
+    const val UPDATE_ETAG = "update_etag"
+    const val UPDATE_CACHED = "update_cached"
+    const val UPDATE_SKIPPED = "update_skipped"
+    const val UPDATE_NOTIFIED = "update_notified"
+    // Bringing history across from the original HabitMiner.
+    const val IMPORT_DONE_AT = "import_done_at"
+    const val IMPORT_CARD_DISMISSED = "import_card_dismissed"
+
+    /** The app that set the next alarm (its alarm screen over the lock screen isn't phone use). */
+    const val ALARM_PACKAGE = "alarm_package"
+
+    // Insight feedback asked only now and then; an insight hidden for the day ("date|key").
+    const val INSIGHT_ASKED_ON = "insight_asked_on"
+    const val INSIGHT_HIDDEN = "insight_hidden"
+
+    // The daily mood and energy check.
+    const val MOOD_CHECK_ENABLED = "mood_check_enabled"
+    const val MOOD_CHECK_MINUTE = "mood_check_minute"
+    const val MOOD_REMINDER = "mood_reminder"
+    const val MOOD_SKIPPED_ON = "mood_skipped_on"
 }

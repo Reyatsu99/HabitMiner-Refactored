@@ -6,11 +6,15 @@
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions"/>
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission" />
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+    <!-- Activity transitions on Android 9 and older. -->
+    <uses-permission android:name="com.google.android.gms.permission.ACTIVITY_RECOGNITION" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
-    <!-- Required for MonitoringService to hold a PARTIAL_WAKE_LOCK so Doze does not suspend the 15-min loop (PERM-3) -->
+    <!-- A few seconds of wake time per scheduled reading (see ReadingAlarm). -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- Lets Data health ask directly to stop battery optimisation, which pauses collection on
          aggressive ROMs (sideloaded course app, not a Play Store build). -->
@@ -21,6 +25,14 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <!-- Opt-in: busy or free from the calendar, never event details. -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <!-- Opt-in, read-only: sleep sessions from Health Connect. -->
+    <uses-permission android:name="android.permission.health.READ_SLEEP" />
+
+    <queries>
+        <package android:name="com.google.android.apps.healthdata" />
+    </queries>
 
     <application
         android:name=".HabitMinerApp"
@@ -28,17 +40,40 @@
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
+        android:enableOnBackInvokedCallback="true"
         android:supportsRtl="true"
         android:theme="@style/Theme.HabitMiner">
         
         <activity
             android:name=".ui.MainActivity"
             android:exported="true"
+            android:label="@string/launcher_label"
             android:launchMode="singleTop"
             android:theme="@style/Theme.HabitMiner">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
+            <!-- Brings history across from the original HabitMiner: its "Share exported data"
+                 sheet lists this app, and so does opening an export ZIP from a file manager. -->
+            <intent-filter android:label="@string/import_label">
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/zip" />
+                <data android:mimeType="application/x-zip-compressed" />
+                <data android:mimeType="application/x-zip" />
+                <!-- Some file managers and chat apps share any ZIP as a generic file. -->
+                <data android:mimeType="application/octet-stream" />
+            </intent-filter>
+            <intent-filter android:label="@string/import_label">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:mimeType="application/zip" />
+                <data android:mimeType="application/x-zip-compressed" />
             </intent-filter>
         </activity>
 
@@ -82,6 +117,88 @@
         <receiver
             android:name=".proactive.CheckInReceiver"
             android:exported="false" />
+
+        <receiver
+            android:name=".collection.ReadingAlarmReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".collection.ActivityTransitionReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".proactive.GoalCheckReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".widget.TodayWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_today">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/today_widget_info" />
+        </receiver>
+
+        <!-- Mindful pause (off until you turn it on in HabitMiner and in Accessibility settings). -->
+        <service
+            android:name=".mindful.MindfulPauseService"
+            android:exported="false"
+            android:label="@string/mindful_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/mindful_pause_service" />
+        </service>
+
+        <activity
+            android:name=".mindful.PauseActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:launchMode="singleInstance"
+            android:taskAffinity=""
+            android:theme="@style/Theme.HabitMiner" />
+
+        <service
+            android:name=".ui.LogActivityTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_stat_habitminer"
+            android:label="@string/tile_log"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.TOGGLEABLE_TILE"
+                android:value="false" />
+        </service>
+
+        <!-- Privacy page; Health Connect opens it to explain why sleep access is asked for. -->
+        <activity
+            android:name=".ui.PrivacyActivity"
+            android:exported="true"
+            android:label="Privacy"
+            android:theme="@style/Theme.HabitMiner">
+            <intent-filter>
+                <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
+            </intent-filter>
+        </activity>
+        <!-- Android 14+: the same page from the system's Health Connect permission screen. -->
+        <activity-alias
+            android:name="ViewPermissionUsageActivity"
+            android:exported="true"
+            android:permission="android.permission.START_VIEW_PERMISSION_USAGE"
+            android:targetActivity=".ui.PrivacyActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW_PERMISSION_USAGE" />
+                <category android:name="android.intent.category.HEALTH_PERMISSIONS" />
+            </intent-filter>
+        </activity-alias>
 
         <provider
             android:name="androidx.core.content.FileProvider"

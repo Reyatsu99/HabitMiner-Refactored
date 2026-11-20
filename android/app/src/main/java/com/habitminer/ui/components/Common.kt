@@ -34,21 +34,21 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.habitminer.analytics.AppCategory
 
-/** Stable, readable colours for each app category (work on both light and dark backgrounds). */
+/** A vivid colour for each app category, bright enough to glow on black and clear on white. */
 fun categoryColor(category: AppCategory): Color =
     when (category) {
-        AppCategory.MESSAGING -> Color(0xFF4FC3F7)
-        AppCategory.SOCIAL -> Color(0xFFF06292)
-        AppCategory.VIDEO -> Color(0xFFEF5350)
-        AppCategory.GAMES -> Color(0xFFAB47BC)
-        AppCategory.BROWSING -> Color(0xFFFFB74D)
-        AppCategory.MUSIC -> Color(0xFF4DB6AC)
-        AppCategory.PRODUCTIVITY -> Color(0xFF81C784)
-        AppCategory.NAVIGATION -> Color(0xFF9575CD)
-        AppCategory.SHOPPING -> Color(0xFFFFD54F)
-        AppCategory.HEALTH -> Color(0xFFAED581)
-        AppCategory.TOOLS -> Color(0xFF90A4AE)
-        AppCategory.OTHER -> Color(0xFFBDBDBD)
+        AppCategory.MESSAGING -> Color(0xFF22C55E)
+        AppCategory.SOCIAL -> Color(0xFFFF3D71)
+        AppCategory.VIDEO -> Color(0xFFFF5A36)
+        AppCategory.GAMES -> Color(0xFFB34DFF)
+        AppCategory.BROWSING -> Color(0xFF2D9CFF)
+        AppCategory.MUSIC -> Color(0xFF14D3C4)
+        AppCategory.PRODUCTIVITY -> Color(0xFFFF9F0A)
+        AppCategory.NAVIGATION -> Color(0xFF6E5BFF)
+        AppCategory.SHOPPING -> Color(0xFFFFC21A)
+        AppCategory.HEALTH -> Color(0xFF8BD400)
+        AppCategory.TOOLS -> Color(0xFF8E9AAF)
+        AppCategory.OTHER -> Color(0xFFA0A0AA)
     }
 
 /** Section heading with an optional action on the right ("See all"). */

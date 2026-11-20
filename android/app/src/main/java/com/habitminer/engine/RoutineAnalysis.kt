@@ -1,0 +1,111 @@
+package com.habitminer.engine
+
+import com.habitminer.analytics.ContextSample
+import com.habitminer.analytics.DeviationFinder
+import com.habitminer.analytics.DeviationReport
+import com.habitminer.analytics.LabelledPeriod
+import com.habitminer.analytics.NapCandidate
+import com.habitminer.analytics.NapDetector
+import com.habitminer.analytics.NapRecords
+import com.habitminer.analytics.RecordedNap
+import com.habitminer.analytics.NightSignals
+import com.habitminer.analytics.PlaceInference
+import com.habitminer.analytics.SleepCorrections
+import com.habitminer.analytics.SleepDetector
+import com.habitminer.analytics.SleepEstimate
+import com.habitminer.analytics.TimeUtil
+import com.habitminer.analytics.UsageSession
+import com.habitminer.data.PlaceEntity
+import com.habitminer.data.UserLabelEntity
+import com.habitminer.repository.FeedbackRepository
+import java.time.ZoneId
+import java.time.temporal.ChronoUnit
+import javax.inject.Inject
+import javax.inject.Singleton
+
+/**
+ * Sleep, naps and deviations from the same inputs, shared by the Insights screen and the
+ * background prompts so both see the same thing.
+ */
+@Singleton
+class RoutineAnalysis
+    @Inject
+    constructor(
+        private val feedbackRepository: FeedbackRepository,
+    ) {
+        data class Result(
+            /** Up to 30 nights, oldest first. */
+            val nights: List<SleepEstimate>,
+            val deviations: DeviationReport,
+            /** Likely naps yesterday and today, oldest first. */
+            val naps: List<NapCandidate>,
+            val periods: List<LabelledPeriod>,
+            /** Nap and period answers by key. */
+            val answers: Map<String, String>,
+            /** Naps you confirmed or added and Health Connect's, (start, end), overlaps merged. */
+            val confirmedNaps: List<Pair<Long, Long>>,
+            /** The same naps with the answers they're made of, to edit them. */
+            val napRecords: List<RecordedNap> = emptyList(),
+            /** How your corrected nights shift the other estimates, if they do. */
+            val sleepShift: SleepCorrections.Shift? = null,
+        )
+
+        suspend fun run(
+            sessions: List<UsageSession>,
+            samples: List<ContextSample>,
+            unlocks: List<Long>,
+            labels: List<UserLabelEntity>,
+            places: List<PlaceEntity>,
+            now: Long,
+            zone: ZoneId,
+            signals: NightSignals = NightSignals(),
+            busy: List<Pair<Long, Long>> = emptyList(),
+        ): Result {
+            val today = TimeUtil.dateOf(now, zone)
+            val periods = LabelMappers.periods(labels)
+            val detected = SleepDetector.detectRange(sessions, unlocks, samples, today, 30, now, zone, signals)
+            // Nights you corrected, and nights from Health Connect, are known: they replace the
+            // estimate for that night and teach it for the others. Your own fixes win.
+            val yours = LabelMappers.sleepFixes(labels)
+            val fixed = yours.map { it.wakeDate }.toSet()
+            val fixes = yours + LabelMappers.healthNights(labels, zone).filter { it.wakeDate !in fixed }
+            val nights = SleepCorrections.apply(detected, fixes, sessions, unlocks, samples, zone, signals, now)
+            val report = DeviationFinder.find(sessions, unlocks, nights, today, now, zone, periods)
+
+            // A labelled period keeps growing while the change it explains continues.
+            report.shift?.takeIf { it.label != null }?.let { shift ->
+                val label =
+                    labels.firstOrNull { l ->
+                        l.kind == UserLabelEntity.KIND_PERIOD &&
+                            LabelMappers.periodFrom(l)?.let { kotlin.math.abs(ChronoUnit.DAYS.between(it, shift.since)) <= 2 } == true
+                    }
+                val period = label?.let { l -> periods.firstOrNull { it.from == LabelMappers.periodFrom(l) } }
+                if (label?.refKey != null && period != null && period.to.isBefore(today)) {
+                    feedbackRepository.extendPeriod(label.refKey, period.from, today)
+                }
+            }
+
+            val homePlace =
+                places.firstOrNull { it.label.equals("Home", ignoreCase = true) }?.placeHash
+                    ?: PlaceInference.suggestNames(samples, zone).entries.firstOrNull { it.value == "Home" }?.key
+            val knownNaps = LabelMappers.healthNaps(labels)
+            val napAnswers = LabelMappers.napAnswers(labels)
+            val napRecords = NapRecords.build(napAnswers, knownNaps)
+            // Detected naps you haven't said anything about yet.
+            val naps =
+                (1 downTo 0).flatMap { back ->
+                    val day = today.minusDays(back.toLong())
+                    NapDetector.candidates(sessions, unlocks, samples, day, now, zone, nights.firstOrNull { it.wakeDate == day }, homePlace, busy, signals.rings)
+                }.filterNot { c -> knownNaps.any { (a, b) -> a < c.end && b > c.start } || NapRecords.answered(c, napAnswers) }
+            return Result(
+                nights = nights,
+                deviations = report,
+                naps = naps,
+                periods = periods,
+                answers = LabelMappers.answers(labels),
+                confirmedNaps = napRecords.map { it.start to it.end },
+                napRecords = napRecords,
+                sleepShift = SleepCorrections.shift(detected, fixes),
+            )
+        }
+    }

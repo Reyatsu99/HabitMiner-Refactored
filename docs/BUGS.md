@@ -1,0 +1,373 @@
+# Reported bugs
+
+Bugs found while using HabitMiner Extended day to day. Each entry is logged when it's
+reported and kept after it's fixed, with what changed. All seven were fixed together on
+26 Oct 2026 and checked against two full exports (yours and a second phone's): the nights
+you had corrected, the naps you had answered, and the alarm patterns of both phones.
+
+| ID | Reported | Area | Summary | Status |
+|----|----------|------|---------|--------|
+| B1 | 16 Oct 2026 | Sleep | A quiet alarm that went unheard was taken as waking up | Fixed |
+| B2 | 18 Oct 2026 | Screen time | Today's total misses use the heatmap shows; day totals are off | Fixed |
+| B3 | 18 Oct 2026 | Insights | "Used your phone while on the move 307 times" is far too high | Fixed |
+| B4 | 21 Oct 2026 | Naps | A nap after Reddit wasn't found, no nap notification, and naps can't be added by hand | Fixed |
+| B5 | 21 Oct 2026 | Sleep | Week view lost the per-day night and nap details the original app had; tap a day to see them | Done |
+| B6 | 24 Oct 2026 | Sleep | Wake time shown in the future (09:20 at 09:06); I actually woke at 08:00 | Fixed |
+| B7 | 26 Oct 2026 | Today | Insight card stays after "Useful" and keeps asking; mood and energy rarely appear | Fixed |
+
+## How the fixes were checked
+
+Each night you had corrected was replayed with the old and the new detection (wake-up error
+against your times, in minutes; negative is too early):
+
+| Night ending | Before | After |
+|--------------|--------|-------|
+| Fri 16 Oct | −79 | −5 |
+| Sun 18 Oct | −9 | −9 |
+| Wed 21 Oct | −114 | 0 |
+| Thu 22 Oct | −1 | −1 |
+| Fri 23 Oct | −163 | −20 |
+| Sat 24 Oct | 0 | 0 |
+
+The learned "wake up later than detected" adjustment drops from 45 minutes to none, since it
+had mostly been learned from the alarm mistakes. Every nap you answered "asleep" is found
+again, including the late-morning one on Mon 19 Oct, which an earlier draft of the fix had
+swallowed into the night. On the second phone, nights still end at the last alarm switched
+off in the morning, as before.
+
+---
+
+## B1. A ringing alarm counts as waking up
+
+**Reported:** Fri 16 Oct 2026
+**Area:** Sleep (also screen time and the hourly heatmap)
+**Status:** Fixed (26 Oct 2026)
+
+**What happened**
+- Sleep showed last night as **4h 49m, about 03:20 to 08:10**, with "alarm set for 08:10"
+  given as evidence.
+- The alarm rang at 08:10 at a volume too low to hear, so I slept through it. It kept
+  re-ringing after each snooze. History shows the Clock app in front three times:
+  08:10–08:20, 08:30–08:40 and 08:50–09:00 (about 9 minutes each).
+- I actually got up around **09:10**, when I first used the phone (Clock, Gmail, Snapchat,
+  09:10–09:29).
+
+**Expected**
+- Woke around 09:10. That makes the night about 5h 50m.
+- The alarm screens shouldn't count as screen time. Today they added about 27 minutes of
+  "Clock" use, and the heatmap shows Friday 08:00–09:00 as "29 min, mostly Clock".
+
+**Likely cause** (from reading the code, not yet confirmed)
+- The alarm screen appears over the lock screen, so Android logs the Clock app as being in
+  front even though nobody unlocked the phone. The session builder counts that as app use.
+- `SleepDetector` only treats a wake-up as brief (part of the night) when Clock use is 5
+  minutes or less (`ActivityCluster.isBrief`). An alarm that rings for its full ~10 minutes
+  goes over that, so the night ends at the first ring.
+- The next-alarm signal then backs up the wrong wake time ("alarm set for 08:10") instead
+  of questioning it.
+
+**Ideas for the fix** (later)
+- Don't count foreground time while the lock screen is still showing (no unlock before it)
+  as use, for sleep and for screen time. Alarm and timer screens are the main case.
+- Recognise a ringing alarm: the Clock app in front over the lock screen at a set alarm
+  time, repeating at snooze intervals.
+- End the night at the first real unlock after the alarm, not at the alarm itself.
+- Add a test with this exact night: asleep 03:20, alarm 08:10 with two snoozes, up at 09:10.
+
+
+**What changed**
+- An alarm or timer screen over the lock screen is no longer stored as app use. It's logged
+  as an alarm ring instead, so it's not screen time and not in the heatmap. Sessions stored
+  before the update (and imported ones) are repaired once.
+- Sleep tells two kinds of alarm apart. Switched off or snoozed within seconds: you were
+  awake for a moment, a brief wake-up. Rang until the clock app gave up (a minute or more):
+  you slept through it, and the night says so ("slept through the alarm 4 times from 08:10").
+- The night ends at the first real use after it, not at the first ring. Your night: 03:20 to
+  09:24, against your 09:30.
+
+---
+
+## B2. Screen time total doesn't match the heatmap
+
+**Reported:** Sun 18 Oct 2026 (noticed over the previous few days)
+**Area:** Screen time on Today, the notification, the widget, the Trends curve and day totals
+**Status:** Fixed (26 Oct 2026)
+
+**What happened**
+- At 01:24 on Sunday, Today showed **23m** screen time ("29m less than a usual weekend
+  day by now"). The Today bar chart and the Trends "Today" line agreed with 23m.
+- The heatmap on Trends showed **Sunday 00:00–01:00: 60 min, mostly Stremio** for the
+  same hour. I was watching Stremio that whole time.
+- Yesterday's total was also clearly wrong.
+
+**Expected**
+- Every screen shows the same number for the same time: about 60m by 01:00 here.
+- A day's total counts the time actually used during that day.
+
+**Likely cause** (from reading the code, not yet confirmed)
+- The headline total, the Today bars, the notification, the widget and the "Today" curve
+  only count sessions that **started** today (`getTodayUsage` and `getUsageSince` filter on
+  `startTime >= startOfDay`), and each session's full length goes to the day it started.
+- The heatmap instead splits every session across the hours it actually covered
+  (`Heatmap.build`), so it gets this right.
+- So a Stremio session that started before midnight and ran past it was missing from
+  Sunday's total, while all of it, including the part after midnight, went to Saturday.
+  That would make Saturday too high and Sunday too low. Late-night sessions are common for
+  me, so day totals have been off by a lot.
+- Possibly adding to it: merging repeat visits to the same app keeps the first visit's
+  start time, so a visit after midnight can be folded into a session from before it. Long
+  sessions are also cut off at 4 hours (`MAX_OPEN_SESSION_MS`), which a long film could hit.
+
+**Ideas for the fix** (later)
+- Work out every total by clipping sessions to the day (and hour), the way the heatmap
+  does, and query sessions that overlap the day rather than ones that start in it.
+- Use the same per-day figure for history, "usual day", goals, Weekly Story and exports.
+- Check against Digital Wellbeing for a day with a session across midnight.
+- Add a test: a session 23:30 to 01:00 adds 30m to one day and 60m to the next.
+
+
+**What changed**
+- Sessions are split at midnight when they're read, so each day gets the time used in it: a
+  film from 23:30 to 01:00 is 30 minutes on one day and an hour on the next. Every total
+  (Today, the notification, the widget, history, exports) now agrees with the heatmap.
+- Repeat visits to the same app are never merged across midnight.
+- Stored sessions that ran past midnight, and imported ones, are split once after the update.
+
+---
+
+## B3. "Used your phone while on the move 307 times" is far too high
+
+**Spotted:** Sun 18 Oct 2026, in the Today screenshot for B2; confirmed wrong the same night
+**Area:** The "Worth knowing" insight on Today
+**Status:** Fixed (26 Oct 2026)
+
+**What it showed**
+- "Used your phone while on the move 307 times. Mostly Snapchat. Detected with the motion
+  sensor."
+
+**Why it looks wrong**
+- 307 times in a week is far more than the walking or travelling I actually did. It's
+  probably counting every reading or session where the motion sensor saw any movement,
+  such as moving the phone around in my hand, instead of times I was really walking or
+  in a vehicle.
+
+**Likely cause** (from reading the code, not yet confirmed)
+- `ContextInsights` counts **app sessions**, not trips: every session whose nearest sensor
+  reading wasn't "still" adds one. 307 is roughly how many app opens (mostly short
+  Snapchat ones) had a "moving" reading nearby.
+- Readings are taken when the phone is unlocked or an app is opened, which is exactly
+  when it's being picked up and handled. So the accelerometer often reads "moving" while
+  I'm sitting down.
+- The nearest reading can also be some distance in time from the session it's applied to.
+
+**Ideas for the fix** (later)
+- Count distinct stretches of moving (for example 5 minutes or more), not sessions.
+- Only call it moving when the step counter shows steps or Android's activity recognition
+  says walking, running, cycling or in a vehicle. Ignore accelerometer movement from
+  handling the phone.
+- Only use a reading taken close to the session.
+
+
+**What changed**
+- "On the go" now needs the step counter to see walking at the time, or Android's activity
+  recognition to say you were in a vehicle or cycling. Moving the phone in your hand doesn't
+  count any more.
+- It counts trips, not sessions: looks at the phone within 10 minutes of each other while
+  moving are one. Your last week: 62 trips instead of 307.
+
+---
+
+## B4. Missed nap, no nap notification, and no way to add naps
+
+**Reported:** Wed 21 Oct 2026
+**Area:** Naps (Sleep screen, Today, notifications)
+**Status:** Fixed (26 Oct 2026)
+
+**What happened**
+- On Wednesday I slept after using Reddit (heatmap: 10:00–11:00, 15 min, mostly Reddit).
+  The phone was barely touched for a few hours after that: 11:00–12:00 had 4 min (Google),
+  12:00–13:00 nothing, 13:00–14:00 had 2 min (WhatsApp), 14:00–15:00 had 7 min (Instagram).
+  No nap was recorded.
+- I never got a "Were you asleep?" notification. The only way to see or answer nap
+  questions is to keep opening the app.
+- There's no way to add a nap myself, let alone more than one in a day.
+
+**Expected**
+- A nap from roughly 11:00 to early afternoon is found, or at least asked about.
+- A notification asks about it soon after I pick the phone up again.
+- I can add naps by hand, several per day, and edit or remove them, like fixing a night.
+
+**Likely cause** (from reading the code, not yet confirmed)
+- `NapDetector` joins a nap across a pickup only if the pickup is "brief": at most 3 min of
+  use within 10 min (`ActivityCluster.isBrief`). The 4 min of Google at 11:xx is over that,
+  so the nap is cut there. The pieces left over may each be under the 45 min minimum, or the
+  trimming of "dozing off" gaps at the start (under 30 min) may eat the rest.
+- A candidate with low confidence (for example no darkness or charging seen when I picked
+  the phone up) is never shown on Today and never notified.
+- The notification only goes out if every one of these holds: the screen is on when the
+  background check runs, it's within 3 hours of the nap ending, it isn't quiet hours, it's
+  a "receptive" moment, check-in questions are on, and the shared limit of 3 a day isn't
+  used up. Only the most recent unanswered nap is ever asked about.
+- Adding sleep by hand exists only for nights (`FixNightSheet`), not for naps.
+
+**Ideas for the fix** (later)
+- Allow a few minutes of quick use inside a nap (checking a message), as long as there are
+  no steps and the gaps on both sides are long.
+- Still ask about low-confidence candidates, just with softer wording.
+- Ask right after the next unlock following the nap, with nap questions not held back by
+  the daily limit, and show any unanswered naps on Today and on Sleep.
+- Add an "Add a nap" sheet on Sleep (start and end time, any day this week), allowing
+  several per day, editable and removable. Hand-added naps should count like confirmed ones.
+- Checked: this week's "Naps 7, 15h 51m in total" is correct, so the nap totals are fine.
+
+
+**What changed**
+- The nap detector starts again from the next pickup when a stretch isn't a nap, and steps
+  from a walk just before the nap no longer count against it. Your Wednesday nap is found as
+  12:37 to 13:50 (the morning had walking at 11:00 and 12:00, so it isn't one long nap).
+- "Were you asleep?" goes out for likely naps and for any nap of an hour or more, within 4
+  hours, outside the daily limit of three, and isn't held back by Do Not Disturb.
+- Add, change and remove naps yourself, as many a day as you had: "Add a nap" on Sleep, or
+  from a day's details. The question also has "Yes, but at other times".
+- Answers to the same nap (asked twice as it grew) count once, and a nap that overlaps one
+  you've already answered isn't asked about again.
+
+---
+
+## B5. Show each day's night and naps, and let me tap a day for details
+
+**Reported:** Wed 21 Oct 2026
+**Area:** Sleep, "This week" (a regression from the original HabitMiner)
+**Status:** Done (26 Oct 2026)
+
+**What the original app shows** (Insights, then Blueprint, then "Sleep this week")
+- One row per day, with a bar split into night and naps, the total, and a line under it,
+  for example "Wed 21: 03:54 → 08:10, woke 1×, nap 2h 14m, 6h 29m".
+- So the nap durations for every day of the week are visible at a glance.
+
+**What Extended shows**
+- Bars per day with the nap stacked on top and a daily total, but no nap durations and no
+  times. The week only gives "Naps 7, 15h 51m in total". The Regularity chart shows night
+  times only.
+
+**Wanted**
+- Each day's nap total visible in the week view again, like the original.
+- Tap a day's bar in "This week" to open that day's details. Regularity stays as it is,
+  since it's only about night sleep:
+  - the night: fell asleep, woke up, how long, brief wake-ups
+  - each nap with its own times, for example "10:00–11:00 and 12:00–13:00, 2 naps, 2h"
+  - the day's total
+  - from there, fix the night or edit, add or remove a nap (ties in with B4)
+
+
+**What changed**
+- "This week" shows all seven days, each with its nap time under the total, and a legend.
+- Tap a day for its details: the night (times, brief wake-ups, how it was worked out), each
+  nap with its own times, the count and the total, with "Fix the times", "Add a nap", and
+  change or remove for each nap. Regularity is unchanged.
+
+---
+
+## B6. Wake time is later than now, and the real wake-up was missed
+
+**Reported:** Sat 24 Oct 2026
+**Area:** Sleep (last night)
+**Status:** Fixed (26 Oct 2026)
+
+**What happened**
+- At 09:06, Sleep showed **5h 30m, about 03:48 to 09:20**. 09:20 hadn't happened yet.
+- "Why it looks like sleep" said: untouched for 3h 13m, dark room, no steps, alarm set for
+  08:00, "adjusted by what 5 known nights showed". It listed one brief wake at 06:50, and
+  "Clock after waking".
+- I actually woke at **08:00**. The original HabitMiner got it right: 03:37 → 08:00, 4h 22m.
+
+**Expected**
+- About 03:37 (or 03:48 with the adjustment) to 08:00.
+- A wake time can never be later than the current time, or than the first real use of
+  the phone after waking.
+
+**Likely cause** (from reading the code, not yet confirmed)
+- Two problems stacked:
+  1. **The real wake-up was treated as a brief wake.** Stopping the 08:00 alarm and the use
+     after it seem to have been joined into the night as a short wake-up (no steps were
+     seen), so the night ran on to a later pickup, around 09:10. This is the opposite of
+     B1: there an alarm ended the night too early, here getting up didn't end it.
+  2. **The correction shift isn't clamped.** The adjustment learned from fixed nights
+     ("wake up 10m after first picking it up") was added on top of that, pushing the wake
+     time to 09:20, past "now".
+- The night was probably also judged while it was still going on, so the most recent
+  pickup was taken as the end.
+
+**Ideas for the fix** (later)
+- Clamp the wake time (after any adjustment) to no later than now, and to no later than
+  the first sustained use after the night.
+- Treat dismissing an alarm followed by normal use within a few minutes (not just Clock)
+  as getting up, unless the phone is put down again for a long stretch. Look at B1 and B6
+  together so both alarm cases come out right.
+- Don't apply the learned shift to a night that's still in progress, or that has no clear
+  end yet.
+- Test with this night: asleep 03:37, brief wake 06:50, alarm 08:00 then use, checked at 09:06.
+
+
+**What changed**
+- The learned adjustment can't move a wake-up past now or past the first real use of the
+  phone after it.
+- Switching off the last alarm of the morning (no other alarm for two hours) ends the night,
+  as long as the sleep before it is a whole night; snoozes before it count as still in bed.
+  When the sleep before it is too short, you clearly slept on and the night carries on.
+- A few quick looks close together (snoozing, the time, a message) are one brief wake-up.
+- That night is now detected as ending at 08:00, as the original app had it.
+
+---
+
+## B7. Insight card won't go away after feedback, and the mood check is rare
+
+**Reported:** Mon 26 Oct 2026
+**Area:** Today (Insight of the day card, mood and energy card)
+**Status:** Fixed (26 Oct 2026)
+
+**What happened**
+- I tapped **Useful** on "Yesterday: more Snapchat than usual (2h 59m, usually about
+  42m)", but the card stayed on Today, still asking for Useful or Fewer like this. It keeps
+  asking for feedback day after day, which gets irritating.
+- The mood and energy card shows up very rarely and at random times.
+
+**Expected**
+- After I answer, the card thanks me briefly and then gets out of the way: it collapses or
+  disappears for the rest of the day.
+- Asking for feedback should be occasional, not on every insight. Take a few answers, then
+  stop asking for a few days or weeks and learn from what I said (which topics I find
+  useful), asking again only now and then to check.
+- The mood and energy check should take that slot instead: shown regularly and
+  predictably (for example once a day at a set time, or in the evening), not at random.
+
+**Likely cause** (from reading the code, not yet confirmed)
+- `insightFeedback` only saves the answer and refreshes. The card is built to stay all day
+  and switch to "Noted: more like this" with Undo, rather than going away. In the
+  screenshot it still showed both buttons, so the answer may not be sticking either: after
+  the refresh the same insight, or a re-picked one, comes back with no feedback recorded.
+  Needs checking.
+- There's no limit on how often feedback is asked for. Every insight comes with the two
+  buttons.
+- The mood and energy card is only shown right after answering a check-in inside the app
+  (`askMood` is set in the check-in answer handler), and check-ins themselves are rare and
+  limited. So mood questions are rare and look random.
+
+**Ideas for the fix** (later)
+- After feedback: a short "Thanks" with Undo for a few seconds, then hide the card for the
+  day, and make sure the answer is saved against the insight's key.
+- Ask for feedback on only some insights. Once there are about 5 answers, stop asking for a
+  couple of weeks, keep adjusting topics from those answers, and then check in now and then.
+- Give the mood and energy check its own steady schedule (once a day, at a time I can pick
+  or in the evening), shown on Today in the slot the insight feedback used, and optionally
+  as a quiet notification. Don't tie it to check-ins.
+
+**What changed**
+- After Useful or Fewer like this, the card says thanks with Undo for a few seconds, then goes
+  away until tomorrow, and so does that day's difference card, which usually says the same.
+- Feedback is asked for every other day while HabitMiner is learning, and every two weeks once
+  you've given five answers in a month. Your answers keep steering which topics come up. On
+  other days the card has "Hide until tomorrow" instead.
+- The mood and energy check has its own time each day (20:00 by default, Settings, then
+  "Daily mood check"), waits on Today until you answer or skip it, and can also arrive as a
+  silent notification.

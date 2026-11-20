@@ -17,8 +17,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         DeviceEventEntity::class,
         UserLabelEntity::class,
         PlaceEntity::class,
+        InsightLogEntity::class,
+        SelfHealthEntity::class,
     ],
-    version = 8,
+    version = 10,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -38,6 +40,12 @@ abstract class AppDatabase : RoomDatabase() {
 
     abstract fun placeDao(): PlaceDao
 
+    abstract fun insightLogDao(): InsightLogDao
+
+    abstract fun selfHealthDao(): SelfHealthDao
+
+    abstract fun batchDao(): BatchDao
+
     companion object {
         @Volatile
         private var instance: AppDatabase? = null
@@ -50,7 +58,7 @@ abstract class AppDatabase : RoomDatabase() {
                         AppDatabase::class.java,
                         "habitminer_database",
                     )
-                        .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+                        .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
                         .build()
                 instance = newInstance
                 newInstance
@@ -201,6 +209,45 @@ abstract class AppDatabase : RoomDatabase() {
                             "firstSeen INTEGER NOT NULL, " +
                             "lastSeen INTEGER NOT NULL)",
                     )
+                }
+            }
+
+        /** v9 (Extended): index for MAX(endTime), which runs on every collection. */
+        /**
+         * v10 (Extended): a detail per device event (alarm time, Do Not Disturb mode, why a
+         * notification went away…), battery temperature, battery saver and thermal status per
+         * reading, the insight log, and HabitMiner's own resource use.
+         */
+        internal val MIGRATION_9_10 =
+            object : Migration(9, 10) {
+                override fun migrate(database: SupportSQLiteDatabase) {
+                    database.execSQL("ALTER TABLE device_events ADD COLUMN detail TEXT")
+                    database.execSQL("ALTER TABLE context_snapshots ADD COLUMN batteryTempC REAL")
+                    database.execSQL("ALTER TABLE context_snapshots ADD COLUMN powerSave INTEGER")
+                    database.execSQL("ALTER TABLE context_snapshots ADD COLUMN thermalStatus INTEGER")
+                    database.execSQL(
+                        "CREATE TABLE IF NOT EXISTS `insight_log` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                            "`timestamp` INTEGER NOT NULL, `date` TEXT NOT NULL, `family` TEXT NOT NULL, `key` TEXT NOT NULL, " +
+                            "`title` TEXT NOT NULL, `body` TEXT NOT NULL, `why` TEXT NOT NULL, `open` TEXT NOT NULL, " +
+                            "`effect` REAL NOT NULL, `score` REAL NOT NULL, " +
+                            "`probability` REAL NOT NULL, `notifiedAt` INTEGER, `feedback` TEXT, `feedbackAt` INTEGER, `openedAt` INTEGER)",
+                    )
+                    database.execSQL("CREATE INDEX IF NOT EXISTS `index_insight_log_date` ON `insight_log` (`date`)")
+                    database.execSQL(
+                        "CREATE TABLE IF NOT EXISTS `self_health` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                            "`timestamp` INTEGER NOT NULL, `cpuUserMs` INTEGER NOT NULL, `cpuSystemMs` INTEGER NOT NULL, " +
+                            "`wakelockMs` INTEGER NOT NULL, `sensorMs` INTEGER NOT NULL, `mobileMams` INTEGER NOT NULL, " +
+                            "`wifiMams` INTEGER NOT NULL, `bluetoothMams` INTEGER NOT NULL, `batteryLevel` INTEGER NOT NULL, " +
+                            "`chargeCounterUah` INTEGER)",
+                    )
+                    database.execSQL("CREATE INDEX IF NOT EXISTS `index_self_health_timestamp` ON `self_health` (`timestamp`)")
+                }
+            }
+
+        internal val MIGRATION_8_9 =
+            object : Migration(8, 9) {
+                override fun migrate(database: SupportSQLiteDatabase) {
+                    database.execSQL("CREATE INDEX IF NOT EXISTS index_app_usage_endTime ON app_usage(endTime)")
                 }
             }
 

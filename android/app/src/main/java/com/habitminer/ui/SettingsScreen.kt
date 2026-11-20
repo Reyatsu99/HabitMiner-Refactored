@@ -2,31 +2,48 @@
 
 package com.habitminer.ui
 
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.material.icons.rounded.Palette
+import androidx.compose.material.icons.rounded.NotificationsActive
+import androidx.compose.material.icons.rounded.SystemUpdate
+import androidx.compose.material.icons.rounded.Storage
+import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.SelfImprovement
+import androidx.compose.material.icons.rounded.RadioButtonChecked
+import androidx.compose.material.icons.rounded.Lightbulb
+import androidx.compose.material.icons.rounded.Hub
+import androidx.compose.material.icons.rounded.Place
+import androidx.compose.material.icons.rounded.LightMode
+import androidx.compose.material.icons.rounded.DirectionsRun
+import androidx.compose.material.icons.rounded.DirectionsWalk
+import androidx.compose.material.icons.rounded.Notifications
+import androidx.compose.material.icons.rounded.IosShare
+import androidx.compose.material.icons.rounded.DeleteForever
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.VisibilityOff
+import androidx.compose.material.icons.rounded.Autorenew
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.DeleteOutline
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Security
-import androidx.compose.material.icons.filled.Upload
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -37,246 +54,730 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.habitminer.engine.HabitUiState
 import com.habitminer.engine.HabitViewModel
+import com.habitminer.ui.design.ListRow
+import com.habitminer.ui.design.Note
+import com.habitminer.ui.design.RowGroup
+import com.habitminer.ui.design.ScreenPadding
+import com.habitminer.ui.design.SectionHeader
+import com.habitminer.ui.theme.Appearance
+import com.habitminer.ui.theme.ThemeMode
 import kotlinx.coroutines.delay
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.Switch
-import androidx.compose.material3.OutlinedTextField
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 
-@kotlin.OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     state: HabitUiState,
     viewModel: HabitViewModel,
+    appearance: Appearance,
+    onThemeMode: (ThemeMode) -> Unit,
+    onWallpaperColors: (Boolean) -> Unit,
+    onBack: () -> Unit,
     onOpenToday: () -> Unit = {},
+    onOpenGoals: () -> Unit = {},
 ) {
     val context = LocalContext.current
-    var confirmClearData by remember { mutableStateOf(false) }
-    val scrollState = rememberScrollState()
-
-    // Collect the one-shot share event from the ViewModel. This uses a SharedFlow
-    // with replay=0, so it fires exactly once and is NOT replayed after rotation.
-    LaunchedEffect(viewModel) {
-        viewModel.shareExportEvent.collect { path ->
-            val file = java.io.File(path)
-            val uri = androidx.core.content.FileProvider.getUriForFile(
-                context,
-                "${context.packageName}.fileprovider",
-                file
-            )
-            val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                type = "application/zip"
-                putExtra(android.content.Intent.EXTRA_STREAM, uri)
-                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            context.startActivity(android.content.Intent.createChooser(shareIntent, "Share Exported Data"))
-        }
+    var confirmClear by remember { mutableStateOf(false) }
+    var pickingMoodTime by remember { mutableStateOf(false) }
+    if (pickingMoodTime) {
+        com.habitminer.ui.design.TimeDialog(
+            title = "Mood check time",
+            initialMinute = state.features.moodMinute,
+            onConfirm = { m ->
+                viewModel.setMoodMinute(m)
+                pickingMoodTime = false
+            },
+            onDismiss = { pickingMoodTime = false },
+        )
     }
 
-    Column(
-        modifier =
-            Modifier
-                .fillMaxSize()
-                .verticalScroll(scrollState)
-                .padding(horizontal = 20.dp, vertical = 24.dp),
-    ) {
-        Text(
-            text = "Settings",
-            style = MaterialTheme.typography.headlineLarge,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onBackground,
-        )
-        Spacer(modifier = Modifier.height(24.dp))
+    // The export's share sheet: a one-shot event, not replayed after rotation.
+    LaunchedEffect(viewModel) {
+        viewModel.shareExportEvent.collect { path ->
+            val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", java.io.File(path))
+            val share =
+                android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                    type = "application/zip"
+                    putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                    addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+            context.startActivity(android.content.Intent.createChooser(share, "Share your HabitMiner data"))
+        }
+    }
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) viewModel.importData(uri) }
 
-        // Check-ins, nudges and digest
-        SettingsSection(title = "Check-ins & reminders") {
-            SettingsSwitch(
-                title = "Quick check-ins",
-                description = "Up to 3 one-tap \"what are you doing?\" questions a day, 09:00–22:00. Answers become labels for testing the app's guesses.",
-                checked = state.features.checkIns,
-                onChange = viewModel::setCheckInsEnabled,
-            )
-            SettingsSwitch(
-                title = "Gentle nudges",
-                description = "A heads-up after 25 minutes of late-night scrolling or gaming, or an hour straight in the day. Shares the 3-a-day limit.",
-                checked = state.features.nudges,
-                onChange = viewModel::setNudgesEnabled,
-            )
-            SettingsSwitch(
-                title = "Weekly summary",
-                description = "A short recap every Sunday evening.",
-                checked = state.features.digest,
-                onChange = viewModel::setDigestEnabled,
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            TextButton(onClick = {
-                viewModel.openCheckIn(null)
-                onOpenToday()
-            }) { Text("Answer a check-in now") }
-            Text(
-                text = "${state.checkInCount} check-ins answered · ${state.labelCount} labels in total",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-            )
+    LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 40.dp)) {
+        item(key = "bar") {
+            Row(modifier = Modifier.fillMaxWidth().padding(start = 4.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back") }
+                Spacer(Modifier.width(4.dp))
+                Text("Settings", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.onBackground)
+            }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        item(key = "appearance") {
+            SectionHeader("Appearance", icon = Icons.Rounded.Palette, iconColor = com.habitminer.ui.theme.LocalDataColors.current.notificationsHue.start)
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth().padding(horizontal = ScreenPadding)) {
+                ThemeMode.entries.forEachIndexed { i, mode ->
+                    SegmentedButton(
+                        selected = appearance.themeMode == mode,
+                        onClick = { onThemeMode(mode) },
+                        shape = SegmentedButtonDefaults.itemShape(i, ThemeMode.entries.size),
+                        colors = com.habitminer.ui.design.hueSegmentedColors(com.habitminer.ui.theme.LocalDataColors.current.notificationsHue),
+                    ) { Text(mode.label) }
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            RowGroup {
+                row {
+                    ToggleRow(
+                        "Wallpaper colours",
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                            "Tint buttons and highlights with your wallpaper's colours. Charts keep their own colours."
+                        } else {
+                            "Needs Android 12 or later."
+                        },
+                        appearance.wallpaperColors,
+                        enabled = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S,
+                        onChange = onWallpaperColors,
+                    )
+                }
+            }
+        }
 
-        PlacesSection(state, viewModel)
+        item(key = "notifications") {
+            SectionHeader("Questions and reminders", icon = Icons.Rounded.NotificationsActive, iconColor = com.habitminer.ui.theme.LocalDataColors.current.screenHue.start, info = "These share one limit of three a day, so turning more on doesn't mean more interruptions. Two are outside it: \"Were you asleep?\" soon after a nap, and the mood check at the time you set.")
+            RowGroup {
+                row {
+                    ToggleRow(
+                        "Quick questions",
+                        "\"What are you doing?\", \"Were you asleep?\" after a likely nap, and \"What's going on?\" when your routine changes. Between 09:00 and 22:00.",
+                        state.features.checkIns,
+                        onChange = viewModel::setCheckInsEnabled,
+                    )
+                }
+                row {
+                    ToggleRow(
+                        "Daily mood check",
+                        "On Today from ${com.habitminer.analytics.Format.clockFromMinutes(state.features.moodMinute)}: how you feel and your energy, two taps. Skip it any day.",
+                        state.features.moodCheck,
+                        onChange = viewModel::setMoodCheckEnabled,
+                    )
+                }
+                if (state.features.moodCheck) {
+                    row {
+                        ListRow(
+                            "Mood check time",
+                            supporting = "Change when it appears",
+                            trailingText = com.habitminer.analytics.Format.clockFromMinutes(state.features.moodMinute),
+                            onClick = { pickingMoodTime = true },
+                        )
+                    }
+                    row {
+                        ToggleRow(
+                            "Remind me",
+                            "A silent notification at that time if you haven't answered yet.",
+                            state.features.moodReminder,
+                            onChange = viewModel::setMoodReminder,
+                        )
+                    }
+                }
+                row {
+                    ToggleRow(
+                        "Gentle nudges",
+                        "After 25 minutes of late-night scrolling or gaming, or an hour straight during the day.",
+                        state.features.nudges,
+                        onChange = viewModel::setNudgesEnabled,
+                    )
+                }
+                row {
+                    ToggleRow(
+                        "Unusual-day summary",
+                        "Around 21:00 on days that were clearly different from usual.",
+                        state.features.deviationAlerts,
+                        onChange = viewModel::setDeviationAlertsEnabled,
+                    )
+                }
+                row { ToggleRow("Weekly recap", "A short summary on Sunday evening.", state.features.digest, onChange = viewModel::setDigestEnabled) }
+                row {
+                    ListRow(
+                        "Answer a question now",
+                        supporting = "${state.checkInCount} answered, ${state.labelCount} labels in total",
+                        onClick = {
+                            viewModel.openCheckIn(null)
+                            onOpenToday()
+                        },
+                    )
+                }
+            }
+        }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        item(key = "recording") { RecordingSection(state, viewModel) }
 
-        // Privacy & Data Section
-        SettingsSection(title = "Privacy & Local Data") {
-            SettingsItem(
-                icon = Icons.Default.Security,
-                title = "On-Device Processing",
-                description =
-                    "Your usage, sensor, unlock, and notification summaries stay on this device. Data is never sent to a cloud server.",
+        item(key = "insights") { InsightsSection(state, viewModel) }
+
+        item(key = "mindful") { MindfulSection(onOpenGoals = onOpenGoals) }
+
+        item(key = "places") { PlacesSection(state, viewModel) }
+
+        item(key = "sources") { SourcesSection(state, viewModel) }
+
+        item(key = "updates") {
+            SectionHeader(
+                "App updates",
+                icon = Icons.Rounded.SystemUpdate,
+                iconColor = com.habitminer.ui.theme.LocalDataColors.current.freeHue.start,
+                info =
+                    "Once a day HabitMiner Extended asks GitHub whether a new version is out. That is the only time it uses the network, " +
+                        "and it sends nothing about you. Updates are checked against a checksum and the app's signing key before you're asked to install.",
             )
+            RowGroup {
+                row {
+                    ToggleRow(
+                        "Check for updates",
+                        "Daily, in the background. Turn off to update only by hand.",
+                        state.updateChecks,
+                        icon = Icons.Rounded.Autorenew,
+                        iconColor = com.habitminer.ui.theme.LocalDataColors.current.freeHue.start,
+                        onChange = viewModel::setUpdateChecks,
+                    )
+                }
+                row {
+                    ListRow(
+                        "Version ${state.installedVersion}",
+                        icon = Icons.Rounded.SystemUpdate,
+                        iconColor = com.habitminer.ui.theme.LocalDataColors.current.goodHue.start,
+                        supporting =
+                            when {
+                                state.update != null -> "${state.update.versionName} is available, see Today"
+                                state.updateCheckResult == "checking" -> "Checking…"
+                                state.updateCheckResult == "latest" -> "You're up to date"
+                                state.updateCheckResult == "offline" -> "Couldn't reach GitHub. Try again later"
+                                else -> "Check now"
+                            },
+                        onClick = { viewModel.checkForUpdates() },
+                    )
+                }
+            }
+        }
 
-            Spacer(modifier = Modifier.height(16.dp))
-            Text(
-                text = "Data Retention",
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
+        item(key = "data") {
+            SectionHeader(
+                "Your data",
+                icon = Icons.Rounded.Storage,
+                iconColor = com.habitminer.ui.theme.LocalDataColors.current.goodHue.start,
+                info =
+                    "Everything HabitMiner records stays on this phone. Nothing is sent to a server.\n\n" +
+                        "Export makes a ZIP of CSV files you can open in a spreadsheet or analyse in Python. Import merges an export back in " +
+                        "without duplicates, including exports from the original HabitMiner app.",
             )
-            SingleChoiceSegmentedButtonRow(
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-            ) {
-                val options = listOf(30, 90, 180)
-                options.forEachIndexed { index, days ->
+            Note("Keep data for")
+            val options = listOf(30, 90, 180)
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth().padding(horizontal = ScreenPadding, vertical = 6.dp)) {
+                options.forEachIndexed { i, days ->
                     SegmentedButton(
                         selected = days == state.retentionDays,
                         onClick = { viewModel.setRetentionDays(days) },
-                        shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size)
-                    ) {
-                        Text("${days}d")
-                    }
+                        shape = SegmentedButtonDefaults.itemShape(i, options.size),
+                        colors = com.habitminer.ui.design.hueSegmentedColors(com.habitminer.ui.theme.LocalDataColors.current.goodHue),
+                    ) { Text("$days days") }
                 }
             }
-
-            Spacer(modifier = Modifier.height(16.dp))
-            SettingsAction(
-                icon = Icons.Default.DeleteOutline,
-                title = "Clear collected data",
-                color = MaterialTheme.colorScheme.error,
-                onClick = { confirmClearData = true },
-            )
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // Export Section
-        SettingsSection(title = "Data Portability") {
-            SettingsItem(
-                icon = Icons.Default.Download,
-                title = "Export Data (ZIP)",
-                description = "Packages all your usage, context, habits, and deviation data into a single .zip file for sharing and external analysis.",
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-            Button(
-                onClick = { viewModel.exportDataToCsv() },
-                modifier = Modifier.fillMaxWidth().height(48.dp),
-                shape = RoundedCornerShape(12.dp),
-            ) {
-                Text("Export Data Now")
-            }
-
-            Spacer(modifier = Modifier.height(20.dp))
-            SettingsItem(
-                icon = Icons.Default.Upload,
-                title = "Import Data (ZIP)",
-                description =
-                    "Restore a ZIP made with Export, e.g. after reinstalling or on a new phone. " +
-                        "Your history is merged in without duplicates, and routines are rebuilt from it.",
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            val importLauncher =
-                rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-                    if (uri != null) viewModel.importData(uri)
+            Spacer(Modifier.height(8.dp))
+            RowGroup {
+                row {
+                    ListRow(
+                        "Export data",
+                        supporting = "A ZIP of CSV files to share or analyse",
+                        onClick = { viewModel.exportDataToCsv() },
+                        icon = Icons.Rounded.IosShare,
+                        iconColor = com.habitminer.ui.theme.LocalDataColors.current.goodHue.start,
+                    )
                 }
-            OutlinedButton(
-                onClick = {
-                    importLauncher.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"))
-                },
-                modifier = Modifier.fillMaxWidth().height(48.dp),
-                shape = RoundedCornerShape(12.dp),
-            ) {
-                Text("Import a previous export")
+                row {
+                    val ctx = LocalContext.current
+                    val prefs = remember { ctx.getSharedPreferences(com.habitminer.data.PrefsKeys.PREFS_NAME, android.content.Context.MODE_PRIVATE) }
+                    var priv by remember { mutableStateOf(prefs.getBoolean(com.habitminer.data.PrefsKeys.EXPORT_PRIVATE, false)) }
+                    ToggleRow(
+                        icon = Icons.Rounded.VisibilityOff,
+                        iconColor = com.habitminer.ui.theme.LocalDataColors.current.sleepHue.start,
+                        title = "Hide app names in exports",
+                        description = "Apps become short codes, and place names and text are left out. Good for sharing with others.",
+                        checked = priv,
+                        onChange = {
+                            priv = it
+                            prefs.edit().putBoolean(com.habitminer.data.PrefsKeys.EXPORT_PRIVATE, it).apply()
+                        },
+                    )
+                }
+                row {
+                    ListRow(
+                        "Import from HabitMiner",
+                        icon = Icons.Rounded.Download,
+                        iconColor = com.habitminer.ui.theme.LocalDataColors.current.freeHue.start,
+                        supporting = "A .zip from Export data, in the original HabitMiner or this app",
+                        onClick = { importLauncher.launch(IMPORT_TYPES) },
+                    )
+                }
+                row {
+                    ListRow(
+                        "Delete all data",
+                        supporting = "Usage, readings, routines and labels",
+                        onClick = { confirmClear = true },
+                        icon = Icons.Rounded.DeleteForever,
+                        iconColor = com.habitminer.ui.theme.LocalDataColors.current.alert,
+                    )
+                }
             }
-
-            if (state.exportMessage != null) {
-                LaunchedEffect(state.exportMessage) {
-                    // Import results are longer, so leave them up a little longer.
-                    delay(if (state.exportMessage.startsWith("Imported")) 12_000 else 4_000)
+            state.exportMessage?.let { msg ->
+                LaunchedEffect(msg) {
+                    delay(if (msg.startsWith("Imported")) 12_000 else 5_000)
                     viewModel.clearExportMessage()
                 }
-                Text(
-                    text = state.exportMessage,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(top = 8.dp),
-                )
+                Text(msg, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(horizontal = ScreenPadding, vertical = 10.dp))
             }
         }
 
-        Spacer(modifier = Modifier.height(32.dp))
+        item(key = "about") {
+            SectionHeader("About", icon = Icons.Rounded.Info, iconColor = com.habitminer.ui.theme.LocalDataColors.current.sleepHue.start)
+            val version = remember { runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() ?: "" }
+            RowGroup {
+                row { ListRow("HabitMiner Extended", supporting = "Version $version") }
+                row {
+                    ListRow(
+                        "Privacy",
+                        supporting = "What's recorded, what never is, and where it stays",
+                        onClick = { context.startActivity(android.content.Intent(context, PrivacyActivity::class.java)) },
+                    )
+                }
+                row { ListRow("Typeface", supporting = "Mona Sans by GitHub, SIL Open Font License 1.1") }
+            }
+        }
     }
 
-    if (confirmClearData) {
+    if (confirmClear) {
         AlertDialog(
-            onDismissRequest = { confirmClearData = false },
-            title = { Text("Clear local data?") },
-            text = {
-                Text("This will delete all collected app usage, context snapshots, baselines, and models. This action cannot be undone.")
-            },
+            onDismissRequest = { confirmClear = false },
+            title = { Text("Delete all data?") },
+            text = { Text("This deletes your app usage, readings, routines and labels on this phone. Export first if you want to keep a copy. It can't be undone.") },
             confirmButton = {
-                TextButton(
-                    onClick = {
-                        viewModel.clearDatabase()
-                        confirmClearData = false
-                    },
-                ) {
-                    Text("Clear Data", color = MaterialTheme.colorScheme.error)
-                }
+                TextButton(onClick = {
+                    viewModel.clearDatabase()
+                    confirmClear = false
+                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
             },
-            dismissButton = {
-                TextButton(onClick = { confirmClearData = false }) {
-                    Text("Cancel")
-                }
-            },
+            dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Cancel") } },
         )
     }
 }
 
 @Composable
-fun SettingsSwitch(
+fun ToggleRow(
     title: String,
     description: String,
     checked: Boolean,
+    enabled: Boolean = true,
+    icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    iconColor: androidx.compose.ui.graphics.Color? = null,
     onChange: (Boolean) -> Unit,
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-            Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
-            Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+    ListRow(
+        title,
+        supporting = description,
+        maxSupportingLines = 4,
+        icon = icon,
+        iconColor = iconColor,
+        trailing = { Switch(checked = checked, onCheckedChange = onChange, enabled = enabled) },
+        onClick = if (enabled) ({ onChange(!checked) }) else null,
+    )
+}
+
+/**
+ * The mindful pause (off by default): a few seconds to breathe before apps you want to use less,
+ * and focus sessions. Needs HabitMiner's accessibility service, which Android hides behind
+ * "Allow restricted settings" for apps installed from a file.
+ */
+@Composable
+fun MindfulSection(onOpenGoals: () -> Unit) {
+    val context = LocalContext.current
+    var tick by remember { mutableStateOf(0) }
+    androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) { tick++ }
+    val enabled = remember(tick) { com.habitminer.mindful.MindfulPause.enabled(context) }
+    val serviceOn = remember(tick) { com.habitminer.mindful.MindfulPause.serviceOn(context) }
+    val seconds = remember(tick) { com.habitminer.mindful.MindfulPause.seconds(context) }
+    val focusUntil = remember(tick) { com.habitminer.mindful.MindfulPause.focusUntil(context) }
+    SectionHeader(
+        "Mindful pause",
+        icon = Icons.Rounded.SelfImprovement,
+        iconColor = com.habitminer.ui.theme.LocalDataColors.current.pickupsHue.start,
+        info =
+            "Before an app from your Use less list opens, a short breathing screen asks whether you want it now. You can always open it. " +
+                "Friction like this cut social media use by about a third in a field study, without blocking anything.\n\n" +
+                "It uses an accessibility service that only notices which app comes to the front. It never reads the screen.",
+    )
+    RowGroup {
+        row {
+            ToggleRow(
+                "Pause before use-less apps",
+                when {
+                    enabled && !serviceOn -> "Also turn on \"HabitMiner mindful pause\" in Accessibility settings"
+                    enabled -> "On, for the apps in Goals > Use less"
+                    else -> "Off"
+                },
+                enabled,
+                onChange = { on ->
+                    com.habitminer.mindful.MindfulPause.setEnabled(context, on)
+                    if (on && !com.habitminer.mindful.MindfulPause.serviceOn(context)) {
+                        runCatching {
+                            context.startActivity(android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                        }
+                    }
+                    tick++
+                },
+            )
         }
-        Switch(checked = checked, onCheckedChange = onChange)
+        if (enabled) {
+            row { ListRow("Apps", supporting = "Your Use less apps in Goals", onClick = onOpenGoals) }
+            row {
+                Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                    Text("Length", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+                    Spacer(Modifier.height(8.dp))
+                    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                        listOf(5, 8).forEachIndexed { i, s ->
+                            SegmentedButton(
+                                selected = seconds == s,
+                                onClick = {
+                                    com.habitminer.mindful.MindfulPause.setSeconds(context, s)
+                                    tick++
+                                },
+                                shape = SegmentedButtonDefaults.itemShape(i, 2),
+                            ) { Text("$s seconds") }
+                        }
+                    }
+                }
+            }
+            row {
+                if (focusUntil != null) {
+                    ListRow(
+                        "Focusing until ${com.habitminer.analytics.Format.clock(focusUntil, java.time.ZoneId.systemDefault())}",
+                        supporting = "Use-less apps stay behind the pause until then. Tap to end now.",
+                        onClick = {
+                            com.habitminer.mindful.MindfulPause.endFocus(context)
+                            tick++
+                        },
+                    )
+                } else {
+                    Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                        Text("Focus session", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+                        Text("Use-less apps can't be opened from the pause until it ends (or you end it).", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.height(8.dp))
+                        Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+                            listOf(25, 50, 90).forEach { m ->
+                                androidx.compose.material3.OutlinedButton(onClick = {
+                                    com.habitminer.mindful.MindfulPause.startFocus(context, m)
+                                    tick++
+                                }) { Text("$m min") }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if (enabled && !serviceOn) {
+        com.habitminer.ui.RestrictedSettingsGuide("the accessibility service", modifier = Modifier.padding(horizontal = ScreenPadding, vertical = 8.dp))
+    }
+}
+
+/** Pause, take a break, and choose what's recorded. */
+@Composable
+fun RecordingSection(
+    state: HabitUiState,
+    viewModel: HabitViewModel,
+) {
+    val rec = state.recording
+    val zone = remember { java.time.ZoneId.systemDefault() }
+    var askPause by remember { mutableStateOf(false) }
+    var askBreak by remember { mutableStateOf(false) }
+    SectionHeader(
+        "Recording",
+        icon = Icons.Rounded.RadioButtonChecked,
+        iconColor = com.habitminer.ui.theme.LocalDataColors.current.screenHue.start,
+        info =
+            "Pausing stops everything HabitMiner records, and what Android logs while paused isn't read back afterwards.\n\n" +
+                "A break keeps recording but sends no notifications, and the days are set aside so they don't change what counts as usual. " +
+                "When it ends you get a short welcome-back summary.",
+    )
+    RowGroup {
+        row {
+            ToggleRow(
+                "Recording",
+                when {
+                    !rec.paused -> "On"
+                    rec.pausedUntil != null -> "Paused until ${com.habitminer.analytics.Format.clock(rec.pausedUntil, zone)}"
+                    else -> "Paused until you turn it back on"
+                },
+                !rec.paused,
+                onChange = { on -> if (on) viewModel.resumeRecording() else askPause = true },
+            )
+        }
+        row {
+            val today = java.time.LocalDate.now(zone)
+            val onBreak = rec.breakFrom != null && rec.breakUntil != null && !today.isBefore(rec.breakFrom) && !today.isAfter(rec.breakUntil)
+            if (onBreak) {
+                ListRow(
+                    "On a break",
+                    supporting = "Until ${rec.breakUntil!!.format(java.time.format.DateTimeFormatter.ofPattern("EEEE d MMMM", java.util.Locale.getDefault()))}. Tap to end it now.",
+                    onClick = { viewModel.endBreak() },
+                )
+            } else {
+                ListRow("Take a break", supporting = "No notifications for a few days, and those days don't count as usual", onClick = { askBreak = true })
+            }
+        }
+    }
+    Note("What's recorded")
+    RowGroup {
+        row { ToggleRow("Light and proximity", "Dark or bright, in a pocket or not; helps with sleep", rec.light, icon = Icons.Rounded.LightMode, iconColor = com.habitminer.ui.theme.LocalDataColors.current.nowHue.start, onChange = { v -> viewModel.setSources { it.copy(light = v) } }) }
+        row { ToggleRow("Motion", "Still or moving, from short accelerometer readings", rec.motion, icon = Icons.Rounded.DirectionsRun, iconColor = com.habitminer.ui.theme.LocalDataColors.current.stepsHue.start, onChange = { v -> viewModel.setSources { it.copy(motion = v) } }) }
+        row { ToggleRow("Steps", "From the phone's step counter", rec.steps, icon = Icons.Rounded.DirectionsWalk, iconColor = com.habitminer.ui.theme.LocalDataColors.current.stepsHue.start, onChange = { v -> viewModel.setSources { it.copy(steps = v) } }) }
+        row { ToggleRow("Notification counts", "Which app notified you and whether you opened it, never the text", rec.notifications, icon = Icons.Rounded.Notifications, iconColor = com.habitminer.ui.theme.LocalDataColors.current.notificationsHue.start, onChange = { v -> viewModel.setSources { it.copy(notifications = v) } }) }
+        row {
+            ToggleRow(
+                "Phone settings and activity",
+                "Do Not Disturb, alarm time, charger, headphones, walking or travelling, time zone and app installs",
+                rec.phoneState,
+                onChange = { v -> viewModel.setSources { it.copy(phoneState = v) } },
+            )
+        }
+    }
+    if (askPause) {
+        val now = System.currentTimeMillis()
+        val tomorrowMorning = com.habitminer.analytics.TimeUtil.at(java.time.LocalDate.now(zone).plusDays(1), 8, 0, zone)
+        AlertDialog(
+            onDismissRequest = { askPause = false },
+            title = { Text("Pause recording") },
+            text = {
+                Column {
+                    listOf<Pair<String, Long?>>(
+                        "For 1 hour" to now + 60 * 60_000L,
+                        "Until tomorrow, 08:00" to tomorrowMorning,
+                        "Until I turn it back on" to null,
+                    ).forEach { (label, until) ->
+                        TextButton(onClick = {
+                            viewModel.pauseRecording(until)
+                            askPause = false
+                        }) { Text(label) }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { askPause = false }) { Text("Cancel") } },
+        )
+    }
+    if (askBreak) {
+        AlertDialog(
+            onDismissRequest = { askBreak = false },
+            title = { Text("Take a break") },
+            text = {
+                Column {
+                    Text("Recording continues, notifications stop, and these days are set aside from your usual pattern.", style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(8.dp))
+                    listOf(2, 3, 7).forEach { days ->
+                        TextButton(onClick = {
+                            viewModel.startBreak(days)
+                            askBreak = false
+                        }) { Text(if (days == 7) "A week" else "$days days") }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { askBreak = false }) { Text("Cancel") } },
+        )
+    }
+}
+
+/** How the insight of the day reaches you, which topics it covers, and quiet hours for everything. */
+@Composable
+fun InsightsSection(
+    state: HabitUiState,
+    viewModel: HabitViewModel,
+) {
+    val settings = state.insightSettings
+    var showTopics by remember { mutableStateOf(false) }
+    var pickingQuiet by remember { mutableStateOf<Boolean?>(null) } // true = start, false = end
+    SectionHeader(
+        "Insights",
+        icon = Icons.Rounded.Lightbulb,
+        iconColor = com.habitminer.ui.theme.LocalDataColors.current.nowHue.start,
+        info =
+            "Once a day HabitMiner looks for something that clearly stands out against your usual days: a much quieter or " +
+                "busier day, an app you used far more, a late night, a personal best. Most days nothing does, and then there's " +
+                "no insight.\n\nUseful and Fewer like this teach it which topics you care about.",
+    )
+    val options = com.habitminer.analytics.InsightFrequency.entries
+    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth().padding(horizontal = ScreenPadding)) {
+        options.forEachIndexed { i, f ->
+            SegmentedButton(
+                selected = settings.frequency == f,
+                onClick = { viewModel.updateInsightSettings { it.copy(frequency = f) } },
+                shape = SegmentedButtonDefaults.itemShape(i, options.size),
+            ) { Text(if (f == com.habitminer.analytics.InsightFrequency.STANDOUT) "Stand-out" else f.label, maxLines = 1) }
+        }
+    }
+    Note(settings.frequency.description)
+    Spacer(Modifier.height(4.dp))
+    RowGroup {
+        row {
+            ListRow(
+                "Topics",
+                supporting =
+                    if (settings.disabled.isEmpty()) {
+                        "All topics"
+                    } else {
+                        "${com.habitminer.analytics.InsightFamily.entries.size - settings.disabled.size} of ${com.habitminer.analytics.InsightFamily.entries.size} on"
+                    },
+                onClick = { showTopics = !showTopics },
+            )
+        }
+        if (showTopics) {
+            com.habitminer.analytics.InsightFamily.entries.forEach { family ->
+                row {
+                    ToggleRow(
+                        family.label,
+                        family.description,
+                        family !in settings.disabled,
+                        onChange = { on -> viewModel.updateInsightSettings { s -> s.copy(disabled = if (on) s.disabled - family else s.disabled + family) } },
+                    )
+                }
+            }
+        }
+        row {
+            val windows = listOf(8 to 20, 9 to 21, 10 to 22)
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                Text("Notification hours", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+                Text("When an insight may arrive as a notification", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(8.dp))
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                    windows.forEachIndexed { i, (a, b) ->
+                        SegmentedButton(
+                            selected = settings.windowStartHour == a && settings.windowEndHour == b,
+                            onClick = { viewModel.updateInsightSettings { it.copy(windowStartHour = a, windowEndHour = b) } },
+                            shape = SegmentedButtonDefaults.itemShape(i, windows.size),
+                        ) { Text(String.format(java.util.Locale.US, "%02d–%02d", a, b)) }
+                    }
+                }
+            }
+        }
+        row {
+            ListRow(
+                "Quiet hours",
+                supporting =
+                    "No questions, insights or summaries from ${com.habitminer.analytics.Format.clockFromMinutes(settings.quiet.startMinute)} " +
+                        "to ${com.habitminer.analytics.Format.clockFromMinutes(settings.quiet.endMinute)}. Late-night nudges still come while you're on the phone.",
+                maxSupportingLines = 3,
+                onClick = { pickingQuiet = true },
+            )
+        }
+    }
+    pickingQuiet?.let { start ->
+        com.habitminer.ui.design.TimeDialog(
+            title = if (start) "Quiet hours start" else "Quiet hours end",
+            initialMinute = if (start) settings.quiet.startMinute else settings.quiet.endMinute,
+            onConfirm = { m ->
+                viewModel.updateInsightSettings { s -> s.copy(quiet = if (start) s.quiet.copy(startMinute = m) else s.quiet.copy(endMinute = m)) }
+                // After the start, ask for the end.
+                pickingQuiet = if (start) false else null
+            },
+            onDismiss = { pickingQuiet = null },
+        )
+    }
+}
+
+/** Opt-in sources that sharpen sleep and timing: Health Connect sleep and calendar busy times. */
+@Composable
+fun SourcesSection(
+    state: HabitUiState,
+    viewModel: HabitViewModel,
+) {
+    val context = LocalContext.current
+    var healthDenied by remember { mutableStateOf(false) }
+    var calendarDenied by remember { mutableStateOf(false) }
+    val healthLauncher =
+        rememberLauncherForActivityResult(androidx.health.connect.client.PermissionController.createRequestPermissionResultContract()) { granted ->
+            val ok = viewModel.healthConnectPermission in granted
+            healthDenied = !ok
+            viewModel.setHealthConnectEnabled(ok)
+        }
+    val calendarLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+            calendarDenied = !ok
+            viewModel.setCalendarEnabled(ok)
+        }
+    SectionHeader(
+        "Other sources",
+        icon = Icons.Rounded.Hub,
+        iconColor = com.habitminer.ui.theme.LocalDataColors.current.stepsHue.start,
+        info =
+            "Both are off by default and read-only. Nothing is copied off the phone.\n\n" +
+                "Health Connect: if a watch or sleep app records your sleep, those nights replace HabitMiner's guesses and teach it " +
+                "how your nights usually differ from what the phone sees.\n\n" +
+                "Calendar: only when you're busy, never titles, places or people. A still phone during a class or meeting isn't " +
+                "taken for a nap, and questions wait until you're free.",
+    )
+    val status = state.features.healthConnectStatus
+    RowGroup {
+        row {
+            ToggleRow(
+                "Sleep from Health Connect",
+                when {
+                    status == "unavailable" -> "Health Connect isn't on this phone."
+                    status == "needs_update" -> "Update Health Connect from the Play Store first."
+                    healthDenied -> "Sleep access wasn't allowed, so this stays off."
+                    else -> "Use nights recorded by a watch or sleep app."
+                },
+                state.features.healthConnect,
+                enabled = status == "available",
+                onChange = { enable ->
+                    if (enable) {
+                        runCatching { healthLauncher.launch(setOf(viewModel.healthConnectPermission)) }
+                            .onFailure { healthDenied = true }
+                    } else {
+                        viewModel.setHealthConnectEnabled(false)
+                    }
+                },
+            )
+        }
+        row {
+            ToggleRow(
+                "Busy times from your calendar",
+                if (calendarDenied) "Calendar access wasn't allowed, so this stays off." else "Only busy or free, never what the event is.",
+                state.features.calendar,
+                onChange = { enable ->
+                    if (enable) {
+                        calendarLauncher.launch(android.Manifest.permission.READ_CALENDAR)
+                    } else {
+                        viewModel.setCalendarEnabled(false)
+                    }
+                },
+            )
+        }
+    }
+    if (status == "needs_update") {
+        TextButton(
+            onClick = {
+                runCatching {
+                    context.startActivity(
+                        android.content.Intent(
+                            android.content.Intent.ACTION_VIEW,
+                            android.net.Uri.parse("market://details?id=com.google.android.apps.healthdata"),
+                        ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                }
+            },
+            modifier = Modifier.padding(horizontal = ScreenPadding - 12.dp),
+        ) { Text("Update Health Connect") }
     }
 }
 
@@ -288,87 +789,60 @@ fun PlacesSection(
 ) {
     var renaming by remember { mutableStateOf<String?>(null) }
     var newName by remember { mutableStateOf("") }
-    var permissionDenied by remember { mutableStateOf(false) }
+    var denied by remember { mutableStateOf(false) }
     val launcher =
         rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
             val granted = result[android.Manifest.permission.ACCESS_FINE_LOCATION] == true
-            permissionDenied = !granted
+            denied = !granted
             viewModel.setPlacesEnabled(granted)
         }
-
-    SettingsSection(title = "Places (optional)") {
-        SettingsSwitch(
-            title = "Detect places from Wi-Fi",
-            description =
-                "Groups your phone use by place (e.g. home, campus) using the Wi-Fi network you're connected to. " +
-                    "Only a scrambled ID is stored, never the network name or your location. Android asks for location access to allow this.",
-            checked = state.features.places,
-            onChange = { enable ->
-                if (enable) {
-                    launcher.launch(
-                        arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION),
-                    )
-                } else {
-                    viewModel.setPlacesEnabled(false)
-                }
-            },
-        )
-        if (permissionDenied) {
-            Text(
-                "Location access wasn't granted, so places stay off. You can allow it in Android settings.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
+    SectionHeader(
+        "Places",
+        icon = Icons.Rounded.Place,
+        iconColor = com.habitminer.ui.theme.LocalDataColors.current.freeHue.start,
+        info =
+            "Groups your phone use by place (home, campus) using the Wi-Fi network you're connected to. Only a scrambled ID is stored, " +
+                "never the network's name or your location. Android asks for location access to share the network ID, and location " +
+                "services need to stay on.",
+    )
+    val names = state.insights?.placeNames.orEmpty()
+    RowGroup {
+        row {
+            ToggleRow(
+                "Detect places from Wi-Fi",
+                if (denied) "Location access wasn't granted, so places stay off." else "Off by default.",
+                state.features.places,
+                onChange = { enable ->
+                    if (enable) {
+                        launcher.launch(arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION))
+                    } else {
+                        viewModel.setPlacesEnabled(false)
+                    }
+                },
             )
         }
         if (state.features.places) {
-            Text(
-                "Keep location services switched on so Android can share the Wi-Fi ID.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-            )
-            val names = state.insights?.placeNames.orEmpty()
-            if (state.places.isEmpty()) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    "No places yet. They appear after a few readings on Wi-Fi.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                )
-            }
             state.places.forEach { place ->
-                val display = place.label ?: names[place.placeHash] ?: "Unnamed place"
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(display, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
-                        Text(
-                            "Last seen ${Labels.age(place.lastSeen)}" + if (place.label == null) " · suggested name" else "",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                        )
-                    }
-                    TextButton(onClick = {
-                        renaming = place.placeHash
-                        newName = place.label ?: ""
-                    }) { Text("Rename") }
+                row {
+                    ListRow(
+                        place.label ?: names[place.placeHash] ?: "Unnamed place",
+                        supporting = "Last seen ${Labels.age(place.lastSeen)}" + if (place.label == null) ", suggested name" else "",
+                        trailingText = "Rename",
+                        onClick = {
+                            renaming = place.placeHash
+                            newName = place.label ?: ""
+                        },
+                    )
                 }
             }
         }
     }
-
     renaming?.let { hash ->
         AlertDialog(
             onDismissRequest = { renaming = null },
             title = { Text("Name this place") },
             text = {
-                OutlinedTextField(
-                    value = newName,
-                    onValueChange = { newName = it.take(30) },
-                    singleLine = true,
-                    placeholder = { Text("e.g. Home, Library, Hostel") },
-                )
+                OutlinedTextField(value = newName, onValueChange = { newName = it.take(30) }, singleLine = true, placeholder = { Text("Home, Library, Hostel") })
             },
             confirmButton = {
                 TextButton(onClick = {
@@ -376,98 +850,7 @@ fun PlacesSection(
                     renaming = null
                 }) { Text("Save") }
             },
-            dismissButton = {
-                TextButton(onClick = { renaming = null }) { Text("Cancel") }
-            },
+            dismissButton = { TextButton(onClick = { renaming = null }) { Text("Cancel") } },
         )
-    }
-}
-
-@Composable
-fun SettingsSection(
-    title: String,
-    content: @Composable () -> Unit,
-) {
-    Column {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onBackground,
-            modifier = Modifier.padding(bottom = 12.dp),
-        )
-        Card(
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-            shape = RoundedCornerShape(20.dp),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Column(modifier = Modifier.padding(20.dp)) {
-                content()
-            }
-        }
-    }
-}
-
-@Composable
-fun SettingsItem(
-    icon: ImageVector,
-    title: String,
-    description: String,
-) {
-    Row(verticalAlignment = Alignment.Top) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(top = 2.dp),
-        )
-        Column(modifier = Modifier.padding(start = 16.dp)) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = description,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-            )
-        }
-    }
-}
-
-@Composable
-fun SettingsAction(
-    icon: ImageVector,
-    title: String,
-    color: androidx.compose.ui.graphics.Color,
-    onClick: () -> Unit,
-) {
-    Card(
-        onClick = onClick,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
-        shape = RoundedCornerShape(12.dp),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(16.dp).fillMaxWidth(),
-        ) {
-            Icon(imageVector = icon, contentDescription = null, tint = color)
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                color = color,
-                modifier = Modifier.weight(1f).padding(horizontal = 16.dp),
-            )
-            Icon(
-                imageVector = Icons.Default.ChevronRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-            )
-        }
     }
 }

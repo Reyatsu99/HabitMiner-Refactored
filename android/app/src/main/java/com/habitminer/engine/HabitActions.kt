@@ -1,7 +1,6 @@
 package com.habitminer.engine
 
 import com.habitminer.analytics.CheckInOption
-import com.habitminer.data.DeviationEntity
 
 /**
  * What the Today, History and Insights screens can ask for. [HabitViewModel] implements it;
@@ -16,10 +15,81 @@ interface HabitActions {
 
     fun dismissCheckIn()
 
+    /** [key] is a [com.habitminer.analytics.DayDeviation.key]; value EXPECTED or UNUSUAL. */
     fun giveDeviationFeedback(
-        deviation: DeviationEntity,
+        key: String,
+        value: String,
+    )
+
+    /** Answer to "were you asleep?" for a [com.habitminer.analytics.NapCandidate.key]. */
+    fun answerNap(
+        key: String,
+        asleep: Boolean,
+    )
+
+    /** A nap you add, or new times for one ([replacing] are its [com.habitminer.analytics.RecordedNap.keys]). */
+    fun saveNap(
+        start: Long,
+        end: Long,
+        replacing: List<String>,
+    ) = Unit
+
+    /** "That wasn't a nap" for a nap on record. */
+    fun removeNap(keys: List<String>) = Unit
+
+    /** What a routine change was (a [com.habitminer.analytics.PeriodOption] key). */
+    fun labelPeriod(
+        key: String,
+        from: java.time.LocalDate,
         value: String,
     )
 
     fun selectHistoryDate(timeInMillis: Long)
+
+    /** Your own times for the night that ended on [wakeDate]. */
+    fun fixNight(
+        wakeDate: java.time.LocalDate,
+        start: Long,
+        end: Long,
+    ) = Unit
+
+    /** "That wasn't sleep": drops the night that ended on [wakeDate]. */
+    fun markNotSleep(wakeDate: java.time.LocalDate) = Unit
+
+    /** Goes back to the estimate for the night that ended on [wakeDate]. */
+    fun clearNightFix(wakeDate: java.time.LocalDate) = Unit
+
+    /** How you feel (after a check-in, or the daily mood check), 1 (low) to 5 (great); nulls skip. */
+    fun answerMood(
+        mood: Int?,
+        energy: Int?,
+    ) = Unit
+
+    /** "useful", "fewer" or null (undo) for today's insight. */
+    fun insightFeedback(
+        key: String,
+        value: String?,
+    ) = Unit
+
+    /** Puts today's insight away until tomorrow. */
+    fun hideInsight(key: String) = Unit
+
+    fun dismissInsightExplainer() = Unit
+
+    /** "Not now" on the notification permission card. */
+    fun dismissNotificationAsk() = Unit
+
+    fun dismissWelcomeBack() = Unit
+
+    fun downloadUpdate() = Unit
+
+    fun installUpdate() = Unit
+
+    fun skipUpdate() = Unit
+
+    fun setUpdateChecks(enabled: Boolean) = Unit
+
+    fun checkForUpdates() = Unit
+
+    fun dismissImport() = Unit
 }

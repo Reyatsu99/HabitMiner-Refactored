@@ -107,11 +107,20 @@ class SleepDetectorTest {
     }
 
     @Test
-    fun `an unlock in the night splits the gap`() {
+    fun `a quick unlock in the night is a brief wake-up`() {
         val sessions = listOf(s("A", d(2), 23, 0, 30), s("B", wake, 9, 0, 5))
         val est = SleepDetector.detect(sessions, listOf(at(wake, 3, 0)), emptyList(), wake, at(wake, 18), ZONE)!!
-        assertEquals(at(wake, 3, 0), est.sleepStart)
+        assertEquals(at(d(2), 23, 30), est.sleepStart)
         assertEquals(at(wake, 9, 0), est.wakeTime)
+        assertEquals(1, est.briefWakes.size)
+    }
+
+    @Test
+    fun `real phone use in the night splits it`() {
+        val sessions = listOf(s("A", d(2), 23, 0, 30), s("C", wake, 3, 0, 20), s("B", wake, 9, 0, 5))
+        val est = SleepDetector.detect(sessions, emptyList(), emptyList(), wake, at(wake, 18), ZONE)!!
+        assertEquals(at(wake, 3, 20), est.sleepStart)
+        assertTrue(est.briefWakes.isEmpty())
     }
 
     @Test
@@ -126,6 +135,370 @@ class SleepDetectorTest {
         val b = SleepEstimate(d(4), at(wake, 23, 59).plus(MIN).plus(30 * MIN), at(d(4), 8), Confidence.HIGH, 0, null, null, null)
         val sum = SleepDetector.summarize(listOf(a, b), ZONE)!!
         assertEquals(0, sum.avgBedtimeMinutes)
+    }
+}
+
+class SleepSignalsTest {
+    private val wake = d(3)
+    private val sessions = listOf(s("A", d(2), 23, 0, 30), s("B", wake, 7, 30, 5))
+
+    @Test
+    fun `a screen-on without unlock or notification is a glance`() {
+        val screenOn = listOf(at(wake, 2, 0), at(wake, 3, 0), at(wake, 4, 0))
+        val signals =
+            NightSignals.from(
+                screenOn = screenOn,
+                unlocks = listOf(at(wake, 3, 0) + 5_000),
+                notifications = listOf(at(wake, 4, 0) - 5_000),
+                quietModes = emptyList(),
+                nextAlarms = emptyList(),
+                now = at(wake, 18),
+            )
+        assertEquals(listOf(at(wake, 2, 0)), signals.glances)
+        val est = SleepDetector.detect(sessions, emptyList(), emptyList(), wake, at(wake, 18), ZONE, signals)!!
+        assertEquals(1, est.glances)
+        // Glances don't move the times.
+        assertEquals(at(d(2), 23, 30), est.sleepStart)
+    }
+
+    @Test
+    fun `do not disturb and a kept alarm become evidence`() {
+        val signals =
+            NightSignals.from(
+                screenOn = emptyList(),
+                unlocks = emptyList(),
+                notifications = emptyList(),
+                quietModes = listOf(at(d(2), 22, 30) to true, at(wake, 7, 0) to false),
+                // Alarm set in the evening for 07:20, then the clock app sets tomorrow's after it rings.
+                nextAlarms = listOf(at(d(2), 21) to at(wake, 7, 20), at(wake, 7, 21) to at(d(4), 7, 20)),
+                now = at(wake, 18),
+            )
+        assertEquals(listOf(at(wake, 7, 20)), signals.alarms)
+        assertEquals(1, signals.quietHours.size)
+        val est = SleepDetector.detect(sessions, emptyList(), emptyList(), wake, at(wake, 18), ZONE, signals)!!
+        assertTrue(est.evidence.contains("Do Not Disturb on"))
+        assertTrue(est.evidence.any { it.startsWith("alarm set for") })
+    }
+
+    @Test
+    fun `an alarm changed before it rang doesn't count`() {
+        val signals =
+            NightSignals.from(
+                emptyList(), emptyList(), emptyList(), emptyList(),
+                nextAlarms = listOf(at(d(2), 21) to at(wake, 6, 0), at(d(2), 23) to at(wake, 8, 0), at(wake, 8, 1) to null),
+                now = at(wake, 18),
+            )
+        assertEquals(listOf(at(wake, 8, 0)), signals.alarms)
+    }
+}
+
+class SleepCorrectionsTest {
+    /** A night per day: phone down at 23:00, picked up at 07:00. */
+    private val days = (2..8).map { d(it) }
+    private val sessions = days.flatMap { w -> listOf(s("A", w.minusDays(1), 22, 30, 30), s("B", w, 7, 0, 5)) }
+    private val detected = days.mapNotNull { SleepDetector.detect(sessions, emptyList(), emptyList(), it, at(d(9), 12), ZONE) }
+
+    @Test
+    fun `a fixed night uses your times`() {
+        val fix = SleepFix(d(5), at(d(4), 23, 40), at(d(5), 6, 50))
+        val nights = SleepCorrections.apply(detected, listOf(fix), sessions, emptyList(), emptyList(), ZONE)
+        val n = nights.first { it.wakeDate == d(5) }
+        assertEquals(SleepSource.YOU, n.source)
+        assertEquals(fix.start, n.sleepStart)
+        assertEquals(Confidence.HIGH, n.confidence)
+        // Fewer than three fixes: the other nights stay as estimated.
+        assertTrue(nights.filter { it.wakeDate != d(5) }.all { it.source == SleepSource.PHONE })
+    }
+
+    @Test
+    fun `three fixes shift the other nights by the typical difference`() {
+        val fixes =
+            listOf(
+                SleepFix(d(2), at(d(1), 23, 25), at(d(2), 6, 45)),
+                SleepFix(d(3), at(d(2), 23, 35), at(d(3), 6, 40)),
+                SleepFix(d(4), at(d(3), 23, 30), at(d(4), 7, 0)),
+            )
+        val shift = SleepCorrections.shift(detected, fixes)!!
+        assertEquals(30 * MIN, shift.startMs)
+        assertEquals(-15 * MIN, shift.endMs)
+        val nights = SleepCorrections.apply(detected, fixes, sessions, emptyList(), emptyList(), ZONE)
+        val other = nights.first { it.wakeDate == d(7) }
+        assertEquals(SleepSource.ADJUSTED, other.source)
+        assertEquals(at(d(6), 23, 30), other.sleepStart)
+        assertEquals(at(d(7), 6, 45), other.wakeTime)
+    }
+
+    @Test
+    fun `that wasn't sleep removes the night`() {
+        val nights = SleepCorrections.apply(detected, listOf(SleepFix(d(6), 0, 0, notSleep = true)), sessions, emptyList(), emptyList(), ZONE)
+        assertTrue(nights.none { it.wakeDate == d(6) })
+        assertEquals(detected.size - 1, nights.size)
+    }
+
+    @Test
+    fun `phone use inside a fixed night counts as awake`() {
+        val withUse = sessions + s("C", d(5), 2, 0, 20)
+        val n = SleepDetector.fromTimes(withUse, emptyList(), emptyList(), d(5), at(d(4), 23, 0), at(d(5), 7, 0), ZONE)
+        assertEquals(8 * 60 * MIN - 20 * MIN, n.durationMs)
+    }
+}
+
+class ExternalSleepMapperTest {
+    @Test
+    fun `joins a night the watch split in two and keeps naps apart`() {
+        val sessions =
+            listOf(
+                ExternalSleep(at(d(2), 23, 10), at(d(3), 3, 0)),
+                ExternalSleep(at(d(3), 3, 40), at(d(3), 7, 15), awake = listOf(at(d(3), 5, 0) to at(d(3), 5, 10))),
+                ExternalSleep(at(d(3), 14, 0), at(d(3), 14, 50)),
+            )
+        val result = ExternalSleepMapper.map(sessions, ZONE)
+        assertEquals(1, result.nights.size)
+        val night = result.nights[0]
+        assertEquals(d(3), night.wakeDate)
+        assertEquals(at(d(2), 23, 10), night.start)
+        assertEquals(at(d(3), 7, 15), night.end)
+        assertEquals(SleepSource.HEALTH_CONNECT, night.source)
+        // The gap between the two halves counts as awake, plus the watch's own awake stage.
+        assertEquals(2, night.awake!!.size)
+        assertEquals(listOf(at(d(3), 14, 0) to at(d(3), 14, 50)), result.naps)
+        val est = SleepDetector.fromTimes(emptyList(), emptyList(), emptyList(), night.wakeDate, night.start, night.end, ZONE, source = night.source, awake = night.awake)
+        assertEquals((8 * 60 + 5 - 40 - 10) * MIN, est.durationMs)
+    }
+}
+
+class InsightTest {
+    private fun dev(
+        date: LocalDate,
+        kind: DeviationKind,
+        score: Float,
+        explained: String? = null,
+    ) = DayDeviation(date, kind, "Quieter day than usual", "detail", "ALL", score, at(date, 12), partialDay = false, explainedBy = explained)
+
+    private fun candidates(
+        report: DeviationReport,
+        coverage: Map<LocalDate, Float> = emptyMap(),
+    ) = InsightEngine.candidates(report, emptyList(), emptyList(), emptyList(), emptyList(), emptyList(), null, null, coverage, d(10), at(d(10), 20), ZONE)
+
+    @Test
+    fun `only clear, unexplained differences on well-recorded days become insights`() {
+        val report =
+            DeviationReport(
+                listOf(
+                    dev(d(10), DeviationKind.LESS_USE, 2.4f),
+                    dev(d(10), DeviationKind.MORE_UNLOCKS, 1.5f),
+                    dev(d(9), DeviationKind.SHORT_SLEEP, 3.0f, explained = "Exams"),
+                    dev(d(9), DeviationKind.APP_SPIKE, 2.8f),
+                    dev(d(5), DeviationKind.MORE_USE, 4.0f),
+                ),
+                null,
+            )
+        val all = candidates(report)
+        assertEquals(listOf(InsightFamily.APPS, InsightFamily.SCREEN_TIME), all.map { it.family })
+        // Yesterday had a long phone shutdown: only today counts.
+        assertEquals(listOf(InsightFamily.SCREEN_TIME), candidates(report, mapOf(d(9) to 0.5f)).map { it.family })
+    }
+
+    @Test
+    fun `a longest phone-free stretch in weeks is a personal best`() {
+        val sessions = mutableListOf<UsageSession>()
+        for (day in 1..20) for (h in 8..22) sessions += s("A", d(day), h, 0, 10)
+        // Today (day 21): used at 08:00, then nothing until 12:30.
+        sessions += s("A", d(21), 8, 0, 10)
+        sessions += s("A", d(21), 12, 30, 10)
+        val now = at(d(21), 13)
+        val found = InsightEngine.candidates(DeviationReport(emptyList(), null), sessions, emptyList(), emptyList(), emptyList(), emptyList(), null, null, emptyMap(), d(21), now, ZONE)
+        val record = found.single { it.family == InsightFamily.RECORDS }
+        assertTrue(record.title.startsWith("4h 20m phone-free"))
+    }
+
+    @Test
+    fun `nothing stands out means nothing is picked`() {
+        val weak = listOf(Insight(InsightFamily.SCREEN_TIME, "k", d(10), "t", "b", "w", 1.2f, "changes"))
+        assertNull(InsightPicker.pick(weak, emptyList(), InsightFamily.entries.toSet(), d(10), kotlin.random.Random(1)))
+    }
+
+    @Test
+    fun `a topic shown yesterday isn't picked today, and switched-off topics never are`() {
+        val c =
+            listOf(
+                Insight(InsightFamily.SCREEN_TIME, "a", d(10), "t", "b", "w", 3.0f, "changes"),
+                Insight(InsightFamily.SLEEP, "b", d(10), "t", "b", "w", 2.2f, "sleep"),
+            )
+        val history = listOf(InsightHistory(d(9), InsightFamily.SCREEN_TIME, "old", null))
+        val pick = InsightPicker.pick(c, history, InsightFamily.entries.toSet(), d(10), kotlin.random.Random(3))!!
+        assertEquals(InsightFamily.SLEEP, pick.insight.family)
+        assertNull(InsightPicker.pick(c, history, setOf(InsightFamily.SCREEN_TIME), d(10), kotlin.random.Random(3)))
+    }
+
+    @Test
+    fun `fewer like this makes a topic less likely`() {
+        val c =
+            listOf(
+                Insight(InsightFamily.SCREEN_TIME, "a", d(20), "t", "b", "w", 2.5f, "changes"),
+                Insight(InsightFamily.APPS, "b", d(20), "t", "b", "w", 2.5f, "changes"),
+            )
+        val history = (1..6).map { InsightHistory(d(it), InsightFamily.APPS, "x$it", "fewer") } + (1..6).map { InsightHistory(d(it), InsightFamily.SCREEN_TIME, "y$it", "useful") }
+        val random = kotlin.random.Random(7)
+        val picks = (0 until 200).mapNotNull { InsightPicker.pick(c, history, InsightFamily.entries.toSet(), d(20), random, simulations = 1)?.insight?.family }
+        assertTrue(picks.count { it == InsightFamily.SCREEN_TIME } > 3 * picks.count { it == InsightFamily.APPS })
+    }
+
+    @Test
+    fun `a beta sample stays between 0 and 1 with the right mean`() {
+        val r = kotlin.random.Random(11)
+        val xs = (0 until 4000).map { InsightPicker.betaSample(3.0, 1.0, r) }
+        assertTrue(xs.all { it in 0.0..1.0 })
+        assertEquals(0.75, xs.average(), 0.02)
+    }
+
+    @Test
+    fun `coverage counts shutdowns and pauses within waking hours`() {
+        val gaps = DayCoverage.gaps(listOf(at(d(3), 10) to true, at(d(3), 13) to false), at(d(4), 12))
+        val cov = DayCoverage.compute(gaps, listOf(d(3)), at(d(4), 12), ZONE)
+        assertEquals(1f - 3f / 15f, cov.getValue(d(3)), 0.001f)
+    }
+
+    @Test
+    fun `stand-out frequency only notifies for very unusual days`() {
+        assertFalse(InsightFrequency.STANDOUT.notifies(2.2f))
+        assertTrue(InsightFrequency.STANDOUT.notifies(2.6f))
+        assertTrue(InsightFrequency.DAILY.notifies(2.0f))
+        assertFalse(InsightFrequency.WEEKLY.notifies(5f))
+    }
+}
+
+class DeliveryTest {
+    private val noon = at(d(3), 12)
+
+    @Test
+    fun `insights wait for a receptive moment and respect holds`() {
+        val pickup = Moment(noon, screenOn = true, idleBeforeMs = 45 * MIN)
+        assertTrue(Receptivity.receptive(pickup))
+        assertFalse(Receptivity.receptive(pickup.copy(idleBeforeMs = 5 * MIN)))
+        assertTrue(Receptivity.receptive(Moment(noon, screenOn = true, leftMessagingMs = MIN)))
+        assertEquals("Do Not Disturb", Receptivity.hold(pickup.copy(doNotDisturb = true)))
+        assertFalse(Receptivity.receptive(pickup.copy(busy = true)))
+        assertFalse(Receptivity.receptive(pickup.copy(moving = true)))
+    }
+
+    @Test
+    fun `one insight notification a day, inside the window, within the shared limit`() {
+        val m = Moment(noon, screenOn = true, idleBeforeMs = 45 * MIN)
+        fun can(
+            sent: List<SentPrompt> = emptyList(),
+            moment: Moment = m,
+            effect: Float = 3f,
+        ) = InsightDelivery.canNotify(InsightFrequency.STANDOUT, effect, false, 9, 21, moment, sent, ZONE)
+        assertTrue(can())
+        assertFalse(can(effect = 2.1f))
+        assertFalse(can(moment = m.copy(now = at(d(3), 22))))
+        assertFalse(can(sent = listOf(SentPrompt(PromptKind.INSIGHT, at(d(3), 9)))))
+        assertFalse(can(sent = (1..3).map { SentPrompt(PromptKind.CHECK_IN, at(d(3), 8 + it)) }))
+    }
+
+    @Test
+    fun `reminders follow the current stretch in an app`() {
+        val sessions = listOf(s("Insta", d(3), 11, 30, 10), s("Insta", d(3), 11, 41, 9), s("Insta", d(3), 9, 0, 30))
+        val stretch = ReminderPolicy.currentStretch(sessions, "pkg.insta", at(d(3), 11, 50))
+        assertEquals(19 * MIN, stretch)
+        assertEquals(1, ReminderPolicy.dueCount(stretch, 15))
+        assertEquals(11 * MIN, ReminderPolicy.untilNext(stretch, 15))
+        // Not in the app any more.
+        assertEquals(0L, ReminderPolicy.currentStretch(sessions, "pkg.insta", at(d(3), 12, 30)))
+    }
+
+    @Test
+    fun `check-in buttons offer what you usually answer at this hour`() {
+        val answers = listOf(at(d(1), 12) to "eating", at(d(2), 13) to "eating", at(d(2), 11) to "socialising", at(d(1), 20) to "relaxing")
+        assertEquals(listOf(CheckInOption.EATING, CheckInOption.SOCIALISING), LikelyActivity.top2(answers, noon, ZONE))
+        assertEquals(listOf(CheckInOption.STUDYING, CheckInOption.RELAXING), LikelyActivity.top2(emptyList(), noon, ZONE))
+    }
+
+    @Test
+    fun `quiet hours wrap past midnight`() {
+        val q = QuietHours(22 * 60, 8 * 60)
+        assertTrue(23 * 60 in q)
+        assertTrue(7 * 60 in q)
+        assertFalse(12 * 60 in q)
+        assertFalse(0 in QuietHours(0, 0))
+    }
+}
+
+class WeeklyStoryTest {
+    @Test
+    fun `the story covers the last seven days and ends with an experiment`() {
+        val sessions = mutableListOf<UsageSession>()
+        // Two weeks: the earlier one heavier on "Reels".
+        for (day in 1..14) {
+            sessions += s("Reels", d(day), 20, 0, if (day <= 7) 90 else 40)
+            sessions += s("Chat", d(day), 9, 0, 30)
+            sessions += s("Chat", d(day), 13, 0, 30)
+        }
+        // d(15) is a Thursday; at noon the week shown is d(8)..d(14).
+        val story = WeeklyStoryBuilder.build(sessions, emptyList(), emptyList(), emptyList(), emptyList(), 180, setOf("pkg.reels"), d(15), at(d(15), 12), ZONE)!!
+        assertEquals(d(8), story.from)
+        assertEquals(d(14), story.to)
+        assertEquals(StoryCard.Kind.WEEK, story.cards.first().kind)
+        assertEquals("1h 40m a day", story.cards.first().headline)
+        val change = story.cards.first { it.kind == StoryCard.Kind.CHANGE }
+        assertTrue(change.headline.startsWith("Reels −50m"))
+        assertTrue(change.body.contains("wanted to use less"))
+        assertEquals(StoryCard.Kind.EXPERIMENT, story.cards.last().kind)
+        assertEquals(35, story.month.size)
+        assertEquals(java.time.DayOfWeek.MONDAY, story.month.first().first.dayOfWeek)
+    }
+}
+
+class MoodPatternsTest {
+    @Test
+    fun `spearman handles ties and constant input`() {
+        assertEquals(1.0, MoodPatterns.spearman(listOf(1.0, 2.0, 3.0, 4.0), listOf(10.0, 20.0, 30.0, 40.0))!!, 1e-9)
+        assertEquals(-1.0, MoodPatterns.spearman(listOf(1.0, 2.0, 3.0), listOf(3.0, 2.0, 1.0))!!, 1e-9)
+        assertNull(MoodPatterns.spearman(listOf(2.0, 2.0, 2.0), listOf(1.0, 2.0, 3.0)))
+    }
+
+    @Test
+    fun `lower mood after more phone time shows as a pattern, with enough answers`() {
+        val sessions = mutableListOf<UsageSession>()
+        val answers = mutableListOf<MoodAnswer>()
+        for (day in 1..10) {
+            val minutes = day * 10L
+            sessions += s("A", d(day), 10, 0, minutes)
+            answers += MoodAnswer(at(d(day), 12), mood = 6 - (day + 1) / 2, energy = 3)
+        }
+        val p = MoodPatterns.compute(answers, sessions)!!
+        assertTrue(p.moodLink!! < -0.9f)
+        assertNull(p.energyLink)
+        assertTrue(p.summary!!.contains("mood lower"))
+        assertNull(MoodPatterns.compute(answers.take(5), sessions)!!.summary)
+        assertEquals(MoodAnswer(5L, 4, null), MoodPatterns.parse(5L, "mood=4"))
+    }
+}
+
+class PowerModelTest {
+    private val power = PowerModel.SensorPower(accelerometer = 0.2, gyroscope = 6.0, light = 0.1, proximity = 0.1, stepCounter = 0.05)
+
+    @Test
+    fun `daily use adds up deltas, survives a counter reset and gives a share of the battery`() {
+        val t0 = at(d(3), 1)
+        val samples =
+            listOf(
+                PowerModel.Sample(t0, cpuMs = 10_000, wakelockMs = 60_000, sensorMs = 0, radioMams = 0, batteryLevel = 80, chargeCounterUah = 4_000_000),
+                PowerModel.Sample(t0 + 30 * MIN, cpuMs = 46_000, wakelockMs = 120_000, sensorMs = 0, radioMams = 0, batteryLevel = 79, chargeCounterUah = 3_950_000),
+                // Reboot: totals start again from zero.
+                PowerModel.Sample(t0 + 60 * MIN, cpuMs = 36_000, wakelockMs = 60_000, sensorMs = 0, radioMams = 0, batteryLevel = 78, chargeCounterUah = 3_900_000),
+            )
+        val readings = listOf(PowerModel.Reading(t0 + 10 * MIN, 3_600_000, gyro = false), PowerModel.Reading(t0 + 40 * MIN, 0, gyro = true))
+        val day = PowerModel.daily(samples, readings, power, listOf(d(3)), ZONE).single()
+        assertEquals(72_000L, day.cpuMs)
+        assertEquals(120_000L, day.wakelockMs)
+        assertEquals(0.4 + 0.05, day.sensorMah, 1e-9)
+        assertEquals(72_000 / 3_600_000.0 * PowerModel.CPU_MA, day.cpuMah, 1e-9)
+        // 3.9 Ah at 78% means a 5000 mAh battery.
+        assertEquals(5000.0, PowerModel.capacityMah(samples)!!, 1e-6)
+        assertEquals(day.totalMah / 5000.0 * 100, day.sharePct!!, 1e-9)
+        assertFalse(day.excessiveWakelocks)
     }
 }
 
@@ -326,6 +699,8 @@ class PolicyAndFormatTest {
         assertEquals(SensingMode.IDLE, SensingPolicy.choose(false, null, false, 80))
         assertEquals(SensingMode.NORMAL, SensingPolicy.choose(false, null, true, 80))
         assertEquals(SensingMode.LOW_BATTERY, SensingPolicy.choose(true, true, false, 10))
+        assertEquals(SensingMode.LOW_BATTERY, SensingPolicy.choose(true, false, false, 80, powerSave = true))
+        assertEquals(SensingMode.NORMAL, SensingPolicy.choose(true, false, true, 80, powerSave = true))
     }
 
     @Test
@@ -471,5 +846,699 @@ class MotionMathTest {
     fun `too few readings after warm-up give no result`() {
         val few = (0 until 5).map { (400L + it * 20L) to (9.8f + it * 0.1f) }
         assertNull(MotionMath.stats(few, warmUpMs = 300))
+    }
+}
+
+private fun stepsSample(
+    time: Long,
+    steps: Int,
+    lux: Float? = null,
+) = ContextSample(time, lux, null, false, isScreenOn = lux != null, proximityNear = null, batteryLevel = 50, stepsSinceLast = steps)
+
+/** The clock app on screen for [seconds]: an alarm being snoozed, or ringing out if long. */
+private fun clock(
+    date: LocalDate,
+    h: Int,
+    m: Int,
+    seconds: Long = 20,
+): UsageSession {
+    val start = at(date, h, m)
+    return UsageSession("com.android.deskclock", "Clock", AppCategory.TOOLS, start, start + seconds * 1000, seconds * 1000)
+}
+
+class SleepWakeUpTest {
+    private val day = d(5)
+
+    private fun night(): List<UsageSession> =
+        listOf(
+            s("A", d(4), 23, 0, 30),
+            s("A", day, 3, 0, 30),
+            s("B", day, 7, 20, 1),
+            s("C", day, 7, 50, 1),
+            clock(day, 8, 10),
+            s("A", day, 8, 40, 20),
+        )
+
+    @Test
+    fun `brief wake-ups and an alarm don't end the night, walking does`() {
+        val samples = listOf(stepsSample(at(day, 6, 0), 0), stepsSample(at(day, 8, 0), 0), stepsSample(at(day, 8, 35), 200))
+        val est = SleepDetector.detect(night(), emptyList(), samples, day, at(day, 20), ZONE)!!
+        assertEquals(at(day, 3, 30), est.sleepStart)
+        assertEquals(at(day, 8, 10), est.wakeTime)
+        assertEquals(2, est.briefWakes.size)
+        assertEquals((4 * 60 + 40 - 2) * MIN, est.durationMs)
+    }
+
+    @Test
+    fun `steps right after the first wake-up mean you got up`() {
+        val samples = listOf(stepsSample(at(day, 7, 40), 150))
+        val est = SleepDetector.detect(night(), emptyList(), samples, day, at(day, 20), ZONE)!!
+        assertEquals(at(day, 7, 20), est.wakeTime)
+        assertTrue(est.briefWakes.isEmpty())
+    }
+}
+
+class NapDetectorTest {
+    private val day = d(5)
+    private val sessions = listOf(s("A", day, 13, 0, 10), s("B", day, 15, 0, 5))
+
+    @Test
+    fun `a still afternoon gap ending in a dark room is a likely nap`() {
+        val samples = listOf(stepsSample(at(day, 14, 0), 0), stepsSample(at(day, 15, 1), 0, lux = 3f))
+        val naps = NapDetector.candidates(sessions, emptyList(), samples, day, at(day, 18), ZONE, null)
+        assertEquals(1, naps.size)
+        assertEquals(at(day, 13, 10), naps[0].start)
+        assertEquals(at(day, 15, 0), naps[0].end)
+        assertEquals(Confidence.HIGH, naps[0].confidence)
+    }
+
+    @Test
+    fun `walking during the gap is not a nap`() {
+        val samples = listOf(stepsSample(at(day, 14, 0), 500))
+        assertTrue(NapDetector.candidates(sessions, emptyList(), samples, day, at(day, 18), ZONE, null).isEmpty())
+    }
+
+    @Test
+    fun `nap question is asked once, soon after waking`() {
+        val nap = NapCandidate(at(day, 13, 10), at(day, 15, 0), Confidence.HIGH, emptyList())
+        assertTrue(PromptPolicy.canAskNap(true, true, nap, emptySet(), emptyList(), at(day, 15, 20), ZONE))
+        assertFalse(PromptPolicy.canAskNap(true, true, nap, setOf(nap.key), emptyList(), at(day, 15, 20), ZONE))
+        assertFalse(PromptPolicy.canAskNap(true, true, nap, emptySet(), listOf(SentPrompt(PromptKind.NAP, at(day, 15, 5))), at(day, 15, 20), ZONE))
+        assertFalse(PromptPolicy.canAskNap(true, true, nap, emptySet(), emptyList(), at(day, 19, 30), ZONE))
+        // A less certain one is still asked about when it's an hour or more.
+        assertTrue(PromptPolicy.canAskNap(true, true, nap.copy(confidence = Confidence.LOW), emptySet(), emptyList(), at(day, 15, 20), ZONE))
+        val short = NapCandidate(at(day, 14, 10), at(day, 15, 0), Confidence.LOW, emptyList())
+        assertFalse(PromptPolicy.canAskNap(true, true, short, emptySet(), emptyList(), at(day, 15, 20), ZONE))
+        // Three other questions today don't hold it back.
+        val busyDay = listOf(9, 11, 13).map { SentPrompt(PromptKind.CHECK_IN, at(day, it, 0)) }
+        assertTrue(PromptPolicy.canAskNap(true, true, nap, emptySet(), busyDay, at(day, 15, 20), ZONE))
+    }
+}
+
+class DeviationFinderTest {
+    /** 18 regular days (A 10–13, B 20–21), two quieter days, then a nearly empty today. */
+    private fun history(): List<UsageSession> {
+        val out = mutableListOf<UsageSession>()
+        for (day in 1..20) {
+            out += s("A", d(day), 10, 0, if (day >= 19) 60L else 180L)
+            out += s("B", d(day), 20, 0, 60)
+        }
+        out += s("B", d(21), 12, 0, 10)
+        return out
+    }
+
+    private val now = at(d(21), 18)
+
+    @Test
+    fun `a much quieter day and a missing app are flagged`() {
+        val report = DeviationFinder.find(history(), emptyList(), emptyList(), d(21), now, ZONE)
+        val today = report.days.filter { it.date == d(21) }
+        assertTrue(today.any { it.kind == DeviationKind.LESS_USE && it.partialDay })
+        assertTrue(today.any { it.kind == DeviationKind.APP_DROP && it.subject == "A" })
+        assertTrue(today.first { it.kind == DeviationKind.LESS_USE }.notable)
+    }
+
+    @Test
+    fun `several quieter days in a row become a routine change`() {
+        val shift = DeviationFinder.find(history(), emptyList(), emptyList(), d(21), now, ZONE).shift!!
+        assertEquals(d(19), shift.since)
+        assertTrue(shift.less)
+        assertEquals("A", shift.appChanges.first().app)
+    }
+
+    @Test
+    fun `a labelled period explains its days and keeps them out of usual`() {
+        val periods = listOf(LabelledPeriod(d(19), d(21), "Exams"))
+        val report = DeviationFinder.find(history(), emptyList(), emptyList(), d(21), now, ZONE, periods)
+        assertEquals("Exams", report.shift?.label)
+        val today = report.days.filter { it.date == d(21) }
+        assertTrue(today.isNotEmpty())
+        assertTrue(today.all { it.explainedBy == "Exams" && !it.notable })
+    }
+
+    @Test
+    fun `evening summary only between 21 and 23, once`() {
+        val dev = DayDeviation(d(21), DeviationKind.LESS_USE, "Quieter day", "x", "ALL", 3f, now, false)
+        assertFalse(PromptPolicy.canSendDeviationSummary(true, listOf(dev), emptyList(), at(d(21), 20), ZONE))
+        assertTrue(PromptPolicy.canSendDeviationSummary(true, listOf(dev), emptyList(), at(d(21), 21, 30), ZONE))
+        assertFalse(
+            PromptPolicy.canSendDeviationSummary(true, listOf(dev), listOf(SentPrompt(PromptKind.DEVIATIONS, at(d(21), 21))), at(d(21), 21, 30), ZONE),
+        )
+    }
+}
+
+class NextAppModelTest {
+    @Test
+    fun `share sheets and pickers are skipped when learning what comes next`() {
+        val sessions = mutableListOf<UsageSession>()
+        for (day in 1..6) {
+            var minute = 0
+            repeat(10) {
+                sessions += s("A", d(day), 10 + minute / 60, minute % 60, 1)
+                val pick = at(d(day), 10 + (minute + 1) / 60, (minute + 1) % 60)
+                sessions += UsageSession("com.google.android.photopicker", "Photo picker", AppCategory.TOOLS, pick, pick + MIN, MIN)
+                sessions += s("B", d(day), 10 + (minute + 2) / 60, (minute + 2) % 60, 1)
+                minute += 4
+            }
+        }
+        val after = sessions.filter { it.appName == "A" }.maxOf { it.end } + 30_000
+        val guess = NextAppModel.predict(sessions.filter { it.start < after - 30_000 || it.appName == "A" }, after, ZONE)
+        assertEquals("B", guess.first().appName)
+        assertTrue(guess.none { it.appName == "Photo picker" })
+    }
+
+    @Test
+    fun `headphones change what comes next`() {
+        // Every day at 10:00 and 18:00: A then B normally; A then Music with headphones in the evening.
+        val sessions = mutableListOf<UsageSession>()
+        val spans = mutableListOf<ContextSpan>()
+        for (day in 1..8) {
+            for (k in 0 until 4) {
+                sessions += s("A", d(day), 10, k * 10, 2)
+                sessions += s("B", d(day), 10, k * 10 + 3, 2)
+                sessions += s("A", d(day), 18, k * 10, 2)
+                sessions += s("Music", d(day), 18, k * 10 + 3, 2)
+            }
+            spans += ContextSpan(SpanIndex.HEADPHONES, at(d(day), 17, 55), at(d(day), 18, 45))
+        }
+        // Today: A at 13:00, once without and once with headphones on.
+        val today = d(9)
+        val withA = sessions + s("A", today, 13, 0, 2)
+        val now = at(today, 13, 2) + 30_000
+        val plain = NextAppModel.predict(withA, now, ZONE, situations = spans)
+        val withPhones = NextAppModel.predict(withA, now, ZONE, situations = spans + ContextSpan(SpanIndex.HEADPHONES, at(today, 12, 50), now + MIN))
+        // At 13:00 nothing else separates B and Music; headphones tip it clearly to Music.
+        val musicPlain = plain.first { it.appName == "Music" }.share
+        val musicPhones = withPhones.first { it.appName == "Music" }.share
+        assertEquals("Music", withPhones.first().appName)
+        assertTrue(musicPhones > musicPlain + 0.05f)
+    }
+
+    @Test
+    fun `situation spans come from connect and disconnect events`() {
+        val spans =
+            SpanIndex.spans(
+                audio = listOf(Triple(100L, "a", true), Triple(200L, "b", true), Triple(300L, "a", false), Triple(400L, "b", false)),
+                power = listOf(50L to true, 500L to false, 900L to true),
+                activity = listOf(10L to "still", 600L to "vehicle", 700L to "walking"),
+                now = 1000L,
+            )
+        assertEquals(
+            listOf(ContextSpan("headphones", 100, 400), ContextSpan("charging", 50, 500), ContextSpan("charging", 900, 1000), ContextSpan("vehicle", 600, 700)),
+            spans,
+        )
+        val index = SpanIndex(spans)
+        assertEquals(setOf("headphones", "charging"), index.tagsAt(150))
+        assertEquals(setOf("vehicle"), index.tagsAt(650))
+    }
+}
+
+class SleepDaysTest {
+    private fun night(
+        wake: LocalDate,
+        hours: Int,
+    ) = SleepEstimate(wake, at(wake, 2), at(wake, 2 + hours), Confidence.HIGH, 0, null, null, null)
+
+    @Test
+    fun `naps are added to the day they happen, counted by wake date`() {
+        val nights = listOf(night(d(4), 6), night(d(5), 4))
+        val naps = listOf(at(d(5), 14) to at(d(5), 15, 30))
+        val days = SleepDays.build(nights, naps, d(5), 7, ZONE)
+        assertEquals(2, days.size)
+        val today = days.last()
+        assertEquals(4 * 60 * MIN, today.nightMs)
+        assertEquals(90 * MIN, today.napMs)
+        assertEquals((4 * 60 + 90) * MIN, today.totalMs)
+        val week = SleepDays.summarize(days, ZONE)!!
+        assertEquals(((6 * 60 + 5 * 60 + 30) * MIN) / 2, week.avgTotalMs)
+        assertEquals(1, week.napCount)
+    }
+
+    @Test
+    fun `a day with only a nap still counts`() {
+        val days = SleepDays.build(emptyList(), listOf(at(d(5), 14) to at(d(5), 15)), d(5), 7, ZONE)
+        assertEquals(1, days.size)
+        assertNull(days[0].night)
+        assertEquals(60 * MIN, days[0].totalMs)
+    }
+
+    // ---- Unlock merge (Extended) --------------------------------------------------------
+
+    @Test
+    fun unlockMergeCountsAnUnlockSeenByBothRecordsOnce() {
+        val system = listOf(1_000_000L, 2_000_000L)
+        val receiver = listOf(1_004_000L, 3_000_000L)
+        assertEquals(listOf(1_000_000L, 2_000_000L, 3_000_000L), UnlockMerge.merge(system, receiver))
+    }
+
+    @Test
+    fun unlockMergeKeepsEitherListWhenTheOtherIsEmpty() {
+        assertEquals(listOf(5L, 9L), UnlockMerge.merge(emptyList(), listOf(5L, 9L)))
+        assertEquals(listOf(5L, 9L), UnlockMerge.merge(listOf(5L, 9L), emptyList()))
+    }
+
+    @Test
+    fun unlockMergeKeepsReceiverUnlocksFarFromSystemOnes() {
+        val system = listOf(100_000L)
+        val receiver = listOf(10_000L, 100_010L, 200_000L)
+        assertEquals(listOf(10_000L, 100_000L, 200_000L), UnlockMerge.merge(system, receiver))
+    }
+}
+
+class DayRibbonTest {
+    @Test
+    fun ribbonSplitsSessionsAcrossHoursAndStopsAtNow() {
+        val day = d(7)
+        val sessions = listOf(s("A", day, 9, 50, 20), s("B", day, 14, 0, 30))
+        val now = at(day, 14, 20)
+        val r = DayRibbonBuilder.build(sessions, null, null, emptyList(), day, now, ZONE)
+        assertEquals(10, r.todayMinutes[9])
+        assertEquals(10, r.todayMinutes[10])
+        // Only the 20 minutes before now count, and nothing after now.
+        assertEquals(20, r.todayMinutes[14])
+        assertEquals(0, r.todayMinutes[15])
+        assertEquals(14 * 60 + 20, r.nowMinute)
+        assertNull(r.usualMinutes)
+    }
+
+    @Test
+    fun ribbonShowsLastNightFromMidnightToWaking() {
+        val day = d(7)
+        val night = SleepEstimate(day, at(day.minusDays(1), 23, 30), at(day, 7, 15), Confidence.HIGH, 0, null, null, null)
+        val r = DayRibbonBuilder.build(emptyList(), null, night, listOf(at(day, 14, 0) to at(day, 15, 0)), day, at(day, 18, 0), ZONE)
+        assertEquals(listOf(0 to 7 * 60 + 15, 14 * 60 to 15 * 60), r.sleep)
+    }
+}
+
+class PhoneFreeTest {
+    @Test
+    fun longestGapBetweenUsesSinceWaking() {
+        val day = d(7)
+        val sessions = listOf(s("A", day, 8, 0, 10), s("B", day, 9, 0, 10), s("C", day, 12, 30, 5))
+        val unlocks = listOf(at(day, 10, 0))
+        val gap = PhoneFree.longestToday(sessions, unlocks, at(day, 7, 30), at(day, 13, 0))!!
+        // 10:01 to 12:30 is the longest stretch without the phone.
+        assertEquals(at(day, 10, 1), gap.start)
+        assertEquals(at(day, 12, 30), gap.end)
+    }
+
+    @Test
+    fun confirmedNapIsNotPhoneFreeTime() {
+        val day = d(7)
+        val sessions = listOf(s("A", day, 8, 0, 10), s("B", day, 17, 0, 10))
+        val nap = at(day, 9, 0) to at(day, 16, 0)
+        val gap = PhoneFree.longestToday(sessions, emptyList(), at(day, 7, 30), at(day, 17, 30), listOf(nap))!!
+        assertEquals(at(day, 16, 0), gap.start)
+        assertEquals(at(day, 17, 0), gap.end)
+    }
+}
+
+class UsageSummariesTest {
+    @Test
+    fun dailyTotalsSplitSessionsAtMidnight() {
+        val day = d(7)
+        val sessions = listOf(s("A", day.minusDays(1), 23, 50, 20), s("A", day, 10, 0, 30))
+        val daily = UsageSummaries.daily(sessions, 2, day, ZONE)
+        assertEquals(day.minusDays(1), daily[0].first)
+        assertEquals(10 * MIN, daily[0].second)
+        assertEquals(40 * MIN, daily[1].second)
+    }
+
+    @Test
+    fun appSummariesRankByThisWeek() {
+        val day = d(14)
+        val sessions =
+            listOf(
+                s("Old", day.minusDays(10), 10, 0, 300),
+                s("New", day, 9, 0, 20),
+                s("New", day.minusDays(2), 9, 0, 20),
+            )
+        val apps = UsageSummaries.apps(sessions, day, ZONE)
+        assertEquals("New", apps[0].appName)
+        assertEquals(2, apps[0].weekOpens)
+        assertEquals(1, apps[0].todayOpens)
+        assertEquals(0L, apps[1].weekMs)
+        assertEquals(300 * MIN, apps[1].windowMs)
+    }
+
+    @Test
+    fun appDetailCountsOpensRightAfterItsNotifications() {
+        val day = d(14)
+        val sessions = listOf(s("Chat", day, 9, 0, 5), s("Chat", day, 12, 0, 15), s("Chat", day, 20, 0, 10))
+        val notes = listOf(at(day, 8, 59, ) + 30_000L, at(day, 15, 0))
+        val detail = UsageSummaries.detail(sessions, notes, day, ZONE)!!
+        assertEquals(1, detail.opensAfterNotification)
+        assertEquals(3, detail.opens)
+        assertEquals(10 * MIN, detail.medianSessionMs)
+        assertEquals(12, detail.busiestHour)
+    }
+}
+
+class UpdateLogicTest {
+    private fun rel(tag: String) = ReleaseInfo(tag, tag.removePrefix("v"), UpdateLogic.versionCodeOf(tag)!!, "", "https://github.com/a/b/releases/download/$tag/x.apk", 1, "0".repeat(64), "")
+
+    @Test
+    fun `tags become increasing version codes and odd tags are ignored`() {
+        assertEquals(20103, UpdateLogic.versionCodeOf("v2.1.3"))
+        assertTrue(UpdateLogic.versionCodeOf("v2.10.0")!! > UpdateLogic.versionCodeOf("v2.9.9")!!)
+        assertNull(UpdateLogic.versionCodeOf("v2.1.3-rc1"))
+        assertNull(UpdateLogic.versionCodeOf("latest"))
+    }
+
+    @Test
+    fun `only this repository's GitHub downloads over https are trusted`() {
+        assertTrue(UpdateLogic.trustedDownload("https://github.com/a/b/releases/download/v1.0.0/x.apk", "a/b"))
+        assertTrue(UpdateLogic.trustedDownload("https://objects.githubusercontent.com/abc", "a/b"))
+        assertFalse(UpdateLogic.trustedDownload("http://github.com/a/b/releases/download/v1.0.0/x.apk", "a/b"))
+        assertFalse(UpdateLogic.trustedDownload("https://github.com/evil/b/releases/download/v1.0.0/x.apk", "a/b"))
+        assertFalse(UpdateLogic.trustedDownload("https://github.com.evil.com/a/b/releases/download/v1/x.apk", "a/b"))
+    }
+
+    @Test
+    fun `checks wait a day and back off after refusals`() {
+        val day = UpdateLogic.CHECK_INTERVAL_MS
+        assertFalse(UpdateLogic.due(day - 1, 0, 0))
+        assertTrue(UpdateLogic.due(day, 0, 0))
+        assertFalse(UpdateLogic.due(2 * day, 0, 3 * day))
+        assertEquals(TimeUtil.HOUR, UpdateLogic.backoffMs(1, null))
+        assertEquals(4 * TimeUtil.HOUR, UpdateLogic.backoffMs(3, null))
+        assertEquals(day, UpdateLogic.backoffMs(9, null))
+        assertEquals(2 * TimeUtil.HOUR, UpdateLogic.backoffMs(1, 7200))
+    }
+
+    @Test
+    fun `newest skips older, installed and skipped versions`() {
+        val rs = listOf(rel("v2.0.0"), rel("v2.1.0"), rel("v2.2.0"))
+        assertEquals("v2.2.0", UpdateLogic.newest(rs, 20100, null)?.tag)
+        assertEquals("v2.1.0", UpdateLogic.newest(rs.take(2), 20000, "v2.2.0")?.tag)
+        assertNull(UpdateLogic.newest(rs, 20200, null))
+        assertNull(UpdateLogic.newest(rs, 0, null)?.takeIf { false })
+    }
+}
+
+class UsualPickupsTest {
+    private val zone = java.time.ZoneId.of("UTC")
+    private val today = java.time.LocalDate.of(2026, 10, 12)
+
+    private fun day(
+        d: java.time.LocalDate,
+        n: Int,
+    ) = (0 until n).map { TimeUtil.startOfDay(d, zone) + 8 * TimeUtil.HOUR + it * 60_000L }
+
+    @Test
+    fun `median of recent full days, ignoring today, set-aside and empty days`() {
+        val unlocks =
+            day(today.minusDays(1), 30) + day(today.minusDays(2), 40) + day(today.minusDays(3), 50) +
+                day(today.minusDays(4), 200) + day(today, 99)
+        assertEquals(45, PickupAnalyzer.usualPerDay(unlocks, today, zone))
+        assertEquals(40, PickupAnalyzer.usualPerDay(unlocks, today, zone, excluded = setOf(today.minusDays(4))))
+    }
+
+    @Test
+    fun `needs three days`() {
+        assertNull(PickupAnalyzer.usualPerDay(day(today.minusDays(1), 30) + day(today.minusDays(2), 40), today, zone))
+    }
+}
+
+class AlarmWakeTest {
+    private val day = d(5)
+
+    /** Phone down at midnight. */
+    private val bedtime = s("A", d(4), 23, 0, 60)
+
+    @Test
+    fun `an alarm that rang out unheard isn't waking up`() {
+        // Rang for ten minutes every twenty and nobody heard it; up at 09:30.
+        val sessions = listOf(bedtime, clock(day, 8, 10, 599), clock(day, 8, 30, 599), clock(day, 8, 50, 599), s("B", day, 9, 30, 10))
+        val est = SleepDetector.detect(sessions, emptyList(), emptyList(), day, at(day, 20), ZONE)!!
+        assertEquals(at(day, 9, 30), est.wakeTime)
+        assertTrue(est.briefWakes.isEmpty())
+        assertTrue(est.evidence.contains("slept through the alarm 3 times from 08:10"))
+    }
+
+    @Test
+    fun `logged alarm screens count like old clock sessions`() {
+        val signals = NightSignals(rings = listOf(at(day, 8, 10) to at(day, 8, 10) + 599_000L, at(day, 7, 0) to at(day, 7, 0) + 15_000L))
+        val est = SleepDetector.detect(listOf(bedtime, s("B", day, 9, 30, 10)), emptyList(), emptyList(), day, at(day, 20), ZONE, signals)!!
+        assertEquals(at(day, 9, 30), est.wakeTime)
+        // The one snoozed at 07:00 was heard; the one at 08:10 wasn't.
+        assertEquals(listOf(at(day, 7, 0)), est.briefWakes.map { it.start })
+        assertTrue(est.evidence.contains("slept through the alarm at 08:10"))
+    }
+
+    @Test
+    fun `an alarm unlocked to switch off is a wake-up, not a ring`() {
+        val sessions = listOf(bedtime, clock(day, 7, 0, 90), s("B", day, 8, 0, 10))
+        val est = SleepDetector.detect(sessions, listOf(at(day, 7, 1)), emptyList(), day, at(day, 20), ZONE)!!
+        assertEquals(at(day, 8, 0), est.wakeTime)
+        assertEquals(1, est.briefWakes.size)
+        assertTrue(est.briefWakes[0].alarm)
+    }
+
+    @Test
+    fun `switching the alarm off for the day ends the night, and sleeping again later is a nap`() {
+        // Snoozed at 08:10, off at 08:20 with the next alarm at 12:27: up, even though the
+        // phone then stays down until 10:19. 10:20 to 12:27 is a nap.
+        val sessions =
+            listOf(bedtime, clock(day, 8, 10, 17), clock(day, 8, 20, 19), s("B", day, 10, 19, 1), clock(day, 12, 27), s("C", day, 12, 28, 15))
+        val signals = NightSignals(alarms = listOf(at(day, 8, 10), at(day, 8, 20), at(day, 12, 27)))
+        val est = SleepDetector.detect(sessions, emptyList(), emptyList(), day, at(day, 20), ZONE, signals)!!
+        assertEquals(at(day, 8, 20), est.wakeTime)
+        assertEquals(1, est.briefWakes.size)
+        val naps = NapDetector.candidates(sessions, emptyList(), emptyList(), day, at(day, 20), ZONE, est)
+        assertEquals(listOf(at(day, 10, 20) to at(day, 12, 27)), naps.map { it.start to it.end })
+    }
+
+    @Test
+    fun `another alarm soon after means sleeping on`() {
+        val sessions = listOf(bedtime, clock(day, 8, 10, 10), s("B", day, 9, 0, 20))
+        val signals = NightSignals(alarms = listOf(at(day, 8, 10), at(day, 8, 45)))
+        val est = SleepDetector.detect(sessions, emptyList(), emptyList(), day, at(day, 9, 30), ZONE, signals)!!
+        assertEquals(at(day, 9, 0), est.wakeTime)
+    }
+
+    @Test
+    fun `too short a night before the alarm means you slept on after it`() {
+        // Asleep at 03:35, alarm off at 06:15, up at 09:47: one night with a brief wake-up.
+        val sessions = listOf(s("A", day, 3, 0, 35), clock(day, 6, 15, 5), s("B", day, 9, 47, 10))
+        val signals = NightSignals(alarms = listOf(at(day, 6, 15)))
+        val est = SleepDetector.detect(sessions, emptyList(), emptyList(), day, at(day, 20), ZONE, signals)!!
+        assertEquals(at(day, 3, 35), est.sleepStart)
+        assertEquals(at(day, 9, 47), est.wakeTime)
+    }
+
+    @Test
+    fun `quick checks close together are one brief wake-up`() {
+        val sessions = listOf(bedtime, s("B", day, 6, 0, 1), s("C", day, 6, 9, 1), s("B", day, 7, 0, 1), s("D", day, 9, 0, 20))
+        val est = SleepDetector.detect(sessions, emptyList(), emptyList(), day, at(day, 20), ZONE)!!
+        assertEquals(at(day, 9, 0), est.wakeTime)
+        assertEquals(3, est.briefWakes.size)
+    }
+
+    @Test
+    fun `the upcoming alarm is the last one set, if it hasn't rung`() {
+        val signals =
+            NightSignals.from(
+                emptyList(), emptyList(), emptyList(), emptyList(),
+                nextAlarms = listOf(at(d(4), 21) to at(day, 8, 10), at(day, 8, 11) to at(day, 8, 45)),
+                now = at(day, 8, 20),
+            )
+        assertEquals(listOf(at(day, 8, 10)), signals.alarms)
+        assertEquals(at(day, 8, 45), signals.upcoming)
+    }
+}
+
+class SleepShiftClampTest {
+    private val day = d(5)
+    private val night = SleepEstimate(day, at(d(4), 23, 0), at(day, 8, 0), Confidence.MEDIUM, 0, null, null, null)
+    private val later = SleepCorrections.Shift(startMs = 0, endMs = 79 * MIN, nights = 4)
+
+    @Test
+    fun `a learned shift never puts the wake-up in the future`() {
+        val n = SleepCorrections.shifted(night, later, now = at(day, 9, 6))
+        assertEquals(at(day, 9, 6), n.wakeTime)
+    }
+
+    @Test
+    fun `a learned shift stops where you started really using the phone`() {
+        val sessions = listOf(s("B", day, 8, 9, 30))
+        val n = SleepCorrections.shifted(night, later, sessions)
+        assertEquals(at(day, 8, 9), n.wakeTime)
+    }
+
+    @Test
+    fun `an earlier shift still applies`() {
+        val n = SleepCorrections.shifted(night, later.copy(endMs = -10 * MIN), now = at(day, 9))
+        assertEquals(at(day, 7, 50), n.wakeTime)
+    }
+}
+
+class DaySplitTest {
+    @Test
+    fun `a session past midnight is shared between the two days`() {
+        val start = at(d(3), 23, 30)
+        val end = at(d(4), 1, 0)
+        val pieces = DaySplit.split(start, end, 90 * MIN, ZONE)
+        assertEquals(listOf(start to at(d(4), 0), at(d(4), 0) to end), pieces.map { it.start to it.end })
+        assertEquals(listOf(30 * MIN, 60 * MIN), pieces.map { it.durationMs })
+    }
+
+    @Test
+    fun `merged visits keep their real total`() {
+        // Spans 60 minutes but was in front for 45: shared by span, adding up exactly.
+        val pieces = DaySplit.split(at(d(3), 23, 40), at(d(4), 0, 40), 45 * MIN, ZONE)
+        assertEquals(15 * MIN, pieces[0].durationMs)
+        assertEquals(30 * MIN, pieces[1].durationMs)
+        assertEquals(45 * MIN, pieces.sumOf { it.durationMs })
+    }
+
+    @Test
+    fun `a session within one day stays whole`() {
+        assertEquals(1, DaySplit.split(at(d(3), 10), at(d(3), 11), 60 * MIN, ZONE).size)
+        assertFalse(DaySplit.crossesMidnight(at(d(3), 23), at(d(4), 0), ZONE))
+        assertTrue(DaySplit.crossesMidnight(at(d(3), 23), at(d(4), 0) + 1, ZONE))
+    }
+}
+
+class AlarmAppsTest {
+    @Test
+    fun `recognises clock apps and the app that set the alarm`() {
+        assertTrue(AlarmApps.isAlarmApp("com.android.deskclock"))
+        assertTrue(AlarmApps.isAlarmApp("com.sec.android.app.clockpackage"))
+        assertTrue(AlarmApps.isAlarmApp("com.vendor.x", "Clock"))
+        assertTrue(AlarmApps.isAlarmApp("com.urbandroid.sleep", alarmPackage = "com.urbandroid.sleep"))
+        assertFalse(AlarmApps.isAlarmApp("com.whatsapp", "WhatsApp"))
+    }
+}
+
+class OnTheGoTest {
+    private val day = d(2)
+
+    /** Twelve quick looks, a minute each, every 20 minutes from 09:00. */
+    private val sessions = (0 until 12).map { s("App", day, 9 + it / 3, (it % 3) * 20, 1) }
+
+    @Test
+    fun `handling the phone at a desk isn't being on the go`() {
+        // The accelerometer says moving (picked up, put down), but no steps.
+        val samples = sessions.map { sample(it.start + 30_000, motion = 1f).copy(recentSteps = 0) }
+        assertTrue(ContextInsights.compute(sessions, samples, ZONE).none { it.kind == InsightKind.MOVING })
+    }
+
+    @Test
+    fun `use while walking is counted in trips`() {
+        val walking = setOf(0, 1, 6, 7, 11)
+        val samples = sessions.mapIndexed { i, it -> sample(it.start + 30_000).copy(recentSteps = if (i in walking) 80 else 0) }
+        val moving = ContextInsights.compute(sessions, samples, ZONE).single { it.kind == InsightKind.MOVING }
+        // Looks 20 minutes apart are separate trips (within ten minutes they'd be one).
+        assertEquals("Used your phone on the go 5 times this week", moving.headline)
+    }
+
+    @Test
+    fun `activity recognition adds trips in a vehicle`() {
+        // No steps, but in a vehicle from 10:50 to 11:50.
+        val samples = sessions.map { sample(it.start + 30_000).copy(recentSteps = 0) }
+        val activities = listOf(at(day, 8, 0) to "still", at(day, 10, 50) to "vehicle", at(day, 11, 50) to "still")
+        val moving = ContextInsights.compute(sessions, samples, ZONE, activities = activities).single { it.kind == InsightKind.MOVING }
+        assertTrue(moving.detail.contains("activity recognition"))
+        assertEquals("Used your phone on the go 3 times this week", moving.headline)
+    }
+}
+
+class NapRetryTest {
+    private val day = d(5)
+
+    @Test
+    fun `a walk just before a nap doesn't hide it`() {
+        // Walked from 12:40 with the phone untouched, a quick look at 13:20, then a nap until 15:00.
+        val sessions = listOf(s("A", day, 12, 30, 10), s("B", day, 13, 20, 1), s("C", day, 15, 0, 10))
+        val samples = listOf(stepsSample(at(day, 13, 20), 900), stepsSample(at(day, 14, 30), 0), stepsSample(at(day, 15, 1), 0, lux = 3f))
+        val naps = NapDetector.candidates(sessions, emptyList(), samples, day, at(day, 18), ZONE, null)
+        assertEquals(listOf(at(day, 13, 21) to at(day, 15, 0)), naps.map { it.start to it.end })
+    }
+}
+
+class NapRecordsTest {
+    private val day = d(5)
+
+    private fun answer(
+        h1: Int,
+        m1: Int,
+        h2: Int,
+        m2: Int,
+        asleep: Boolean?,
+        at: Long,
+    ): NapAnswer {
+        val a = at(day, h1, m1)
+        val b = at(day, h2, m2)
+        return NapAnswer(NapRecords.key(a, b), a, b, asleep, at)
+    }
+
+    @Test
+    fun `the same nap answered twice as it grew counts once`() {
+        // Asked at 11:37 and again at 12:27 for the nap that started at 10:20: one 2h 07m nap.
+        val naps = NapRecords.build(listOf(answer(10, 20, 11, 37, true, 1), answer(10, 20, 12, 27, true, 2)))
+        assertEquals(1, naps.size)
+        assertEquals(at(day, 10, 20), naps[0].start)
+        assertEquals(at(day, 12, 27), naps[0].end)
+        assertEquals(2, naps[0].keys.size)
+    }
+
+    @Test
+    fun `the latest answer wins, and edited or removed naps drop out`() {
+        val changedMind = listOf(answer(14, 0, 15, 0, true, 1), answer(14, 0, 15, 0, false, 2))
+        assertTrue(NapRecords.build(changedMind).isEmpty())
+        val edited = listOf(answer(14, 0, 15, 0, true, 1), answer(14, 0, 15, 0, null, 2), answer(13, 40, 15, 10, true, 2))
+        assertEquals(listOf(at(day, 13, 40) to at(day, 15, 10)), NapRecords.build(edited).map { it.start to it.end })
+    }
+
+    @Test
+    fun `several naps a day stay separate`() {
+        val naps = NapRecords.build(listOf(answer(10, 0, 11, 0, true, 1), answer(12, 0, 13, 0, true, 1)), health = listOf(at(day, 16, 0) to at(day, 16, 40)))
+        assertEquals(3, naps.size)
+        assertTrue(naps[2].fromHealthConnect)
+        assertEquals(2 * 60 * MIN + 40 * MIN, naps.sumOf { it.durationMs })
+    }
+
+    @Test
+    fun `a nap seen again once it grew isn't asked about twice`() {
+        val answers = listOf(answer(15, 28, 16, 56, true, 1))
+        val grown = NapCandidate(at(day, 15, 28), at(day, 17, 41), Confidence.HIGH, emptyList())
+        assertTrue(NapRecords.answered(grown, answers))
+        val later = NapCandidate(at(day, 18, 0), at(day, 19, 0), Confidence.HIGH, emptyList())
+        assertFalse(NapRecords.answered(later, answers))
+    }
+}
+
+class FeedbackAskTest {
+    private val today = d(20)
+
+    @Test
+    fun `asks every other day while learning`() {
+        assertTrue(FeedbackAsk.shouldAsk(emptyList(), null, today))
+        assertFalse(FeedbackAsk.shouldAsk(emptyList(), today.minusDays(1), today))
+        assertTrue(FeedbackAsk.shouldAsk(emptyList(), today.minusDays(2), today))
+        // Once it asked today, it keeps asking today (the card doesn't change its mind).
+        assertTrue(FeedbackAsk.shouldAsk(emptyList(), today, today))
+    }
+
+    @Test
+    fun `with enough answers it only checks in now and then`() {
+        val answers = (1..5).map { today.minusDays(it * 2L) }
+        assertFalse(FeedbackAsk.shouldAsk(answers, today.minusDays(3), today))
+        assertFalse(FeedbackAsk.shouldAsk(answers, today.minusDays(13), today))
+        assertTrue(FeedbackAsk.shouldAsk(answers, today.minusDays(14), today))
+    }
+}
+
+class MoodScheduleTest {
+    private val day = d(5)
+
+    @Test
+    fun `the mood check is due from its time until answered or skipped`() {
+        assertFalse(MoodSchedule.due(true, 20 * 60, false, false, at(day, 19, 59), ZONE))
+        assertTrue(MoodSchedule.due(true, 20 * 60, false, false, at(day, 20, 0), ZONE))
+        assertFalse(MoodSchedule.due(true, 20 * 60, true, false, at(day, 21, 0), ZONE))
+        assertFalse(MoodSchedule.due(true, 20 * 60, false, true, at(day, 21, 0), ZONE))
+        assertFalse(MoodSchedule.due(false, 20 * 60, false, false, at(day, 21, 0), ZONE))
     }
 }

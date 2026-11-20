@@ -24,6 +24,7 @@ class ImportManager
         private val contextDao: ContextDao,
         private val labelDao: LabelDao,
         private val placeDao: PlaceDao,
+        private val deviceEventDao: DeviceEventDao,
     ) {
         data class Result(
             val usage: Int,
@@ -31,9 +32,13 @@ class ImportManager
             val labels: Int,
             val places: Int,
             val filesRead: Int,
+            /** The export was made with "Hide app names", so its app sessions couldn't be restored. */
+            val hiddenNames: Boolean = false,
         ) {
             val isEmpty: Boolean get() = filesRead == 0
         }
+
+        private var hiddenNames = false
 
         suspend fun importZip(uri: Uri): Result =
             withContext(Dispatchers.IO) {
@@ -42,6 +47,7 @@ class ImportManager
                 var labels = 0
                 var places = 0
                 var files = 0
+                hiddenNames = false
                 val input = context.contentResolver.openInputStream(uri) ?: error("Could not open the file")
                 ZipInputStream(input.buffered()).use { zip ->
                     while (true) {
@@ -54,14 +60,22 @@ class ImportManager
                             name.startsWith("context_snapshots") -> snapshots += importSnapshots(rows).also { files++ }
                             name.startsWith("labels") -> labels += importLabels(rows).also { files++ }
                             name.startsWith("places") -> places += importPlaces(rows).also { files++ }
+                            name.startsWith("device_events") -> importDeviceEvents(rows).also { files++ }
                             else -> Unit // habits, baselines, deviations are recomputed
                         }
                     }
                 }
-                Result(usage, snapshots, labels, places, files)
+                Result(usage, snapshots, labels, places, files, hiddenNames)
             }
 
         private suspend fun importUsage(rows: List<Map<String, String>>): Int {
+            // A privacy-safe export replaces packages with codes like app_3f9a1c02de; restoring
+            // those would fill the history with apps that don't exist.
+            val coded = Regex("^app_[0-9a-f]{10}$")
+            if (rows.isNotEmpty() && rows.all { coded.matches(it["packageName"].orEmpty()) }) {
+                hiddenNames = true
+                return 0
+            }
             val parsed =
                 rows.mapNotNull { r ->
                     runCatching {
@@ -125,6 +139,9 @@ class ImportManager
                             wifiPlace = r["wifiPlace"]?.ifEmpty { null },
                             sensingMs = r["sensingMs"]?.toLongOrNull() ?: 0L,
                             recentSteps = r["recentSteps"]?.toIntOrNull() ?: -1,
+                            batteryTempC = r["batteryTempC"]?.toFloatOrNull(),
+                            powerSave = r["powerSave"]?.toBooleanStrictOrNull(),
+                            thermalStatus = r["thermalStatus"]?.toIntOrNull(),
                         )
                     }.getOrNull()
                 }
@@ -151,6 +168,31 @@ class ImportManager
                     }.getOrNull()
                 }
             if (parsed.isNotEmpty()) labelDao.insertAll(parsed)
+            return parsed.size
+        }
+
+        /**
+         * Unlocks, notifications and screen events. The original HabitMiner exported the
+         * system's unlock history as "UNLOCK" rows with source "system"; those become
+         * KEYGUARD_HIDDEN events, the type Extended keeps them as, so imported history feeds
+         * sleep and pickup analysis like unlocks recorded here.
+         */
+        private suspend fun importDeviceEvents(rows: List<Map<String, String>>): Int {
+            val existing = deviceEventDao.getKeys().toHashSet()
+            val parsed =
+                rows.mapNotNull { r ->
+                    val raw = r["eventType"]?.ifEmpty { null } ?: return@mapNotNull null
+                    val type =
+                        if (r["source"] == "system" && raw == com.habitminer.collection.DeviceEvents.UNLOCK) {
+                            com.habitminer.collection.DeviceEvents.KEYGUARD_HIDDEN
+                        } else {
+                            raw
+                        }
+                    val ts = r["timestamp"]?.toLongOrNull() ?: return@mapNotNull null
+                    if (!existing.add("$type:$ts")) return@mapNotNull null
+                    DeviceEventEntity(eventType = type, packageName = r["packageName"]?.ifEmpty { null }, timestamp = ts, detail = r["detail"]?.ifEmpty { null })
+                }
+            parsed.chunked(500).forEach { deviceEventDao.insertAll(it) }
             return parsed.size
         }
 

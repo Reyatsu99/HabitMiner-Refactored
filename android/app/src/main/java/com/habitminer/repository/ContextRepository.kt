@@ -19,6 +19,7 @@ class ContextRepository
         private val appUsageDao: AppUsageDao,
         private val contextDao: ContextDao,
         private val deviceEventDao: DeviceEventDao,
+        private val batchDao: com.habitminer.data.BatchDao,
     ) {
         val collectionMutex = Mutex()
 
@@ -27,19 +28,23 @@ class ContextRepository
          * sensing mode (5 min when active, up to 30 min when idle).
          */
         suspend fun shouldSkipContextCollection(minGapMs: Long = 10 * 60 * 1000L): Boolean {
-            val latest = contextDao.getLatestSnapshot().firstOrNull()
+            val latest = contextDao.getLatestSnapshotOnce()
             return latest != null && (System.currentTimeMillis() - latest.timestamp) < minGapMs
         }
 
         /** True when a snapshot with sensor readings was taken less than [maxAgeMs] ago. */
         suspend fun hasSensorReadingWithin(maxAgeMs: Long): Boolean {
-            val latest = contextDao.getLatestSnapshotWithSensors().firstOrNull()
+            val latest = contextDao.getLatestSnapshotWithSensorsOnce()
             return latest != null && (System.currentTimeMillis() - latest.timestamp) < maxAgeMs
         }
 
         fun getLatestSnapshot(): Flow<ContextSnapshotEntity?> = contextDao.getLatestSnapshot()
 
         fun getLatestSnapshotWithSensors(): Flow<ContextSnapshotEntity?> = contextDao.getLatestSnapshotWithSensors()
+
+        suspend fun getLatestSnapshotOnce(): ContextSnapshotEntity? = contextDao.getLatestSnapshotOnce()
+
+        suspend fun getLatestSnapshotWithSensorsOnce(): ContextSnapshotEntity? = contextDao.getLatestSnapshotWithSensorsOnce()
 
         fun getSensingMsSince(sinceMs: Long): Flow<Long> = contextDao.getSensingMsSince(sinceMs)
 
@@ -53,6 +58,81 @@ class ContextRepository
         fun getTodaySnapshots(startOfDayMs: Long): Flow<List<ContextSnapshotEntity>> = contextDao.getTodaySnapshots(startOfDayMs)
 
         fun getAllUsage(): Flow<List<AppUsageEntity>> = appUsageDao.getAllUsage()
+
+        /** Sessions that started since [sinceMs], oldest first. */
+        suspend fun getUsageSince(sinceMs: Long): List<AppUsageEntity> = appUsageDao.getUsageSince(sinceMs)
+
+        suspend fun getUsageForPackageSince(
+            packageName: String,
+            sinceMs: Long,
+        ): List<AppUsageEntity> = appUsageDao.getUsageForPackageSince(packageName, sinceMs)
+
+        /**
+         * A string that changes whenever usage, readings or events since [sinceMs] change.
+         * Analyses are cached against it, so the comparison has to be cheap: three indexed
+         * aggregate queries.
+         */
+        suspend fun dataRevisionSince(sinceMs: Long): String =
+            "${appUsageDao.getRevisionSince(sinceMs)}|${contextDao.getRevisionSince(sinceMs)}|${deviceEventDao.getRevisionSince(sinceMs)}"
+
+        suspend fun countDaysWithUsageSince(sinceMs: Long): Int = appUsageDao.countDaysWithUsageSince(sinceMs)
+
+        suspend fun getFirstUsageTime(): Long? = appUsageDao.getFirstStartTime()
+
+        /**
+         * Unlock times since [sinceMs], oldest first: the system's lock-screen log plus any
+         * unlocks our receiver saw since it was last copied (see [com.habitminer.analytics.UnlockMerge]).
+         */
+        suspend fun unlockTimesSince(sinceMs: Long): List<Long> =
+            com.habitminer.analytics.UnlockMerge.merge(
+                deviceEventDao.getTimesSince(com.habitminer.collection.DeviceEvents.KEYGUARD_HIDDEN, sinceMs),
+                deviceEventDao.getTimesSince(com.habitminer.collection.DeviceEvents.UNLOCK, sinceMs),
+            )
+
+        suspend fun countUnlocksSince(sinceMs: Long): Int = unlockTimesSince(sinceMs).size
+
+        suspend fun notificationTimesForPackageSince(
+            packageName: String,
+            sinceMs: Long,
+        ): List<Long> = deviceEventDao.getTimesForPackageSince(com.habitminer.collection.DeviceEvents.NOTIFICATION, packageName, sinceMs)
+
+        /** Headphones, charging and in-vehicle stretches since [sinceMs], for the next-app model. */
+        suspend fun situationSpans(
+            sinceMs: Long,
+            now: Long,
+        ): List<com.habitminer.analytics.ContextSpan> {
+            val e = com.habitminer.collection.DeviceEvents
+            // Start a little earlier so a state that began before the window is known.
+            val events =
+                deviceEventDao.getTypesSince(
+                    listOf(e.AUDIO_CONNECTED, e.AUDIO_DISCONNECTED, e.POWER_CONNECTED, e.POWER_DISCONNECTED, e.ACTIVITY),
+                    sinceMs - 12 * 60 * 60 * 1000L,
+                )
+            return com.habitminer.analytics.SpanIndex.spans(
+                audio =
+                    events.filter { it.eventType == e.AUDIO_CONNECTED || it.eventType == e.AUDIO_DISCONNECTED }.map {
+                        Triple(it.timestamp, e.detailValue(it.detail, "id") ?: "?", it.eventType == e.AUDIO_CONNECTED)
+                    },
+                power =
+                    events.filter { it.eventType == e.POWER_CONNECTED || it.eventType == e.POWER_DISCONNECTED }
+                        .map { it.timestamp to (it.eventType == e.POWER_CONNECTED) },
+                activity = events.filter { it.eventType == e.ACTIVITY }.mapNotNull { ev -> e.detailValue(ev.detail, "type")?.let { ev.timestamp to it } },
+                now = now,
+            )
+        }
+
+        suspend fun getDeviceEventsOfTypesSince(
+            eventTypes: List<String>,
+            sinceMs: Long,
+        ): List<com.habitminer.data.DeviceEventEntity> = deviceEventDao.getTypesSince(eventTypes, sinceMs)
+
+        /** Stores one read of the usage log in a single transaction. */
+        suspend fun insertIngestBatch(
+            sessions: List<AppUsageEntity>,
+            events: List<com.habitminer.data.DeviceEventEntity>,
+        ) {
+            batchDao.insertBatch(sessions, events)
+        }
 
         suspend fun getSnapshotsSince(sinceMs: Long): List<ContextSnapshotEntity> = contextDao.getSnapshotsSince(sinceMs)
 
@@ -86,6 +166,17 @@ class ContextRepository
 
         suspend fun getLastInsertedUsageTimestamp(): Long? = appUsageDao.getLastInsertedTimestamp()
 
+        /** Whether the lock screen was showing just before [beforeMs], from the stored events (null when unknown). */
+        suspend fun lockedBefore(beforeMs: Long): Boolean? =
+            deviceEventDao.lastKeyguardBefore(beforeMs)?.let { it == com.habitminer.collection.DeviceEvents.KEYGUARD_SHOWN }
+
+        /** Replaces stored sessions: [remove] are deleted and [add] inserted, in one transaction. */
+        suspend fun replaceSessions(
+            remove: List<Long>,
+            add: List<AppUsageEntity>,
+            events: List<com.habitminer.data.DeviceEventEntity> = emptyList(),
+        ) = batchDao.replaceSessions(remove, add, events)
+
         suspend fun getLastUsedNonLauncherPackage(launcherPackages: List<String>): String? =
             if (launcherPackages.isEmpty()) {
                 appUsageDao.getLastUsedPackage()
@@ -102,6 +193,8 @@ class ContextRepository
         suspend fun insertAllAppUsage(usages: List<AppUsageEntity>) = appUsageDao.insertAll(usages)
 
         suspend fun insertDeviceEvent(event: com.habitminer.data.DeviceEventEntity) = deviceEventDao.insert(event)
+
+        suspend fun getAllDeviceEvents(): List<com.habitminer.data.DeviceEventEntity> = deviceEventDao.getAll()
 
         suspend fun countDeviceEventsSince(eventType: String, sinceMs: Long): Int = deviceEventDao.countSince(eventType, sinceMs)
 

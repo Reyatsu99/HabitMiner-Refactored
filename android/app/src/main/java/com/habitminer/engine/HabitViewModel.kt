@@ -14,7 +14,6 @@ import com.habitminer.collection.HabitNotificationListener
 import com.habitminer.collection.UsageDataCollector
 import com.habitminer.data.AppUsageEntity
 import com.habitminer.data.ContextSnapshotEntity
-import com.habitminer.data.DeviationEntity
 import com.habitminer.data.DiscoveredHabitEntity
 import com.habitminer.data.PrefsKeys
 import com.habitminer.domain.AppIdentityResolver
@@ -40,11 +39,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -59,8 +60,28 @@ data class FeatureSettings(
     val checkIns: Boolean = true,
     val nudges: Boolean = true,
     val digest: Boolean = true,
+    val deviationAlerts: Boolean = true,
     val places: Boolean = false,
     val placesPermission: Boolean = false,
+    /** Sleep from Health Connect (opt-in). */
+    val healthConnect: Boolean = false,
+    /** Whether Health Connect is on this phone: "available", "needs_update" or "unavailable". */
+    val healthConnectStatus: String = "unavailable",
+    /** Busy times from the calendar (opt-in). */
+    val calendar: Boolean = false,
+    /** The daily mood and energy check, from [moodMinute] (minutes after midnight). */
+    val moodCheck: Boolean = true,
+    val moodMinute: Int = com.habitminer.analytics.MoodSchedule.DEFAULT_MINUTE,
+    /** Also a quiet notification at that time. */
+    val moodReminder: Boolean = false,
+)
+
+/** Progress of bringing an export in. */
+@Immutable
+data class ImportStatus(
+    val running: Boolean,
+    val message: String,
+    val ok: Boolean = true,
 )
 
 @Immutable
@@ -76,10 +97,9 @@ data class HabitUiState(
     val todayAppUsage: ImmutableList<AppUsageEntity> = persistentListOf(),
     val todaySnapshots: ImmutableList<ContextSnapshotEntity> = persistentListOf(),
     val discoveredHabits: ImmutableList<DiscoveredHabitEntity> = persistentListOf(),
-    val todayDeviations: ImmutableList<DeviationEntity> = persistentListOf(),
-    val recentDeviations: ImmutableList<DeviationEntity> = persistentListOf(),
-    val overallDeviationScore: Float = 0f,
-    val predictions: ImmutableList<PredictionEngine.Prediction> = persistentListOf(),
+    /** Likely next apps after [predictionsAfter], from the next-app model. */
+    val predictions: ImmutableList<com.habitminer.analytics.AppGuess> = persistentListOf(),
+    val predictionsAfter: String? = null,
     val predictabilityScore: Float = 0f,
     val baselineStatus: String = "Building baseline...",
     val hasEnoughData: Boolean = false,
@@ -103,7 +123,7 @@ data class HabitUiState(
     val insights: InsightsBundle? = null,
     /** Latest snapshot that has real sensor readings (sensors pause while the screen is off). */
     val latestSensorContext: ContextSnapshotEntity? = null,
-    /** Deviation fingerprint → EXPECTED / UNUSUAL. */
+    /** Deviation key → EXPECTED / UNUSUAL. */
     val deviationFeedback: ImmutableMap<String, String> = persistentMapOf(),
     val checkInCount: Int = 0,
     val labelCount: Int = 0,
@@ -117,9 +137,47 @@ data class HabitUiState(
     val stepsToday: Long = -1L,
     val stepSensorAvailable: Boolean = true,
     val stepPermission: Boolean = true,
+    // ---- Extended ----
+    /** Longest stretch today, while awake, without touching the phone. */
+    val phoneFree: com.habitminer.analytics.PhoneFreeStretch? = null,
+    /** POST_NOTIFICATIONS (Android 13+), asked for in context after the first full day. */
+    val canPostNotifications: Boolean = true,
+    /** How insights reach you (Settings). */
+    val insightSettings: com.habitminer.repository.InsightSettings = com.habitminer.repository.InsightSettings(),
+    /** Right after a check-in: ask how you feel (optional). */
+    val askMood: Boolean = false,
+    /** The daily mood check is waiting on Today (its time has come and it isn't answered or skipped). */
+    val moodDue: Boolean = false,
+    /** "Allow notifications?" on Today was answered with Not now. */
+    val notificationAskDismissed: Boolean = false,
+    /** Notification access was skipped during setup (it can be turned on later from Status). */
+    val notificationAccessSkipped: Boolean = false,
+    /** Show the "bring your HabitMiner history" card on Today. */
+    val showImportCard: Boolean = false,
+    /** The original HabitMiner is installed on this phone. */
+    val oldAppInstalled: Boolean = false,
+    /** An import running or just finished, shown wherever you are. */
+    val importStatus: ImportStatus? = null,
+    /** Pause, break and what's recorded. */
+    val recording: com.habitminer.collection.RecordingState = com.habitminer.collection.RecordingState(),
+    /** After a break: how it went, until dismissed. */
+    val welcomeBack: com.habitminer.analytics.BreakSummary? = null,
+    /** HabitMiner's own battery use for the last 7 days, today last (empty until there are samples). */
+    val selfHealth: ImmutableList<com.habitminer.analytics.PowerModel.DayUse> = persistentListOf(),
+    /** A newer release waiting to be installed. */
+    val update: com.habitminer.analytics.ReleaseInfo? = null,
+    val installState: com.habitminer.update.InstallState = com.habitminer.update.InstallState.Idle,
+    val updateChecks: Boolean = true,
+    val installedVersion: String = "",
+    /** "checking", "latest", "offline" or null before any manual check. */
+    val updateCheckResult: String? = null,
+    /** Screen time per day for the last 14 days, oldest first. */
+    val dailyTotals: ImmutableList<Pair<java.time.LocalDate, Long>> = persistentListOf(),
+    /** Every app used in the last five weeks, most used this week first. */
+    val appSummaries: ImmutableList<com.habitminer.analytics.AppSummary> = persistentListOf(),
 )
 
-@OptIn(FlowPreview::class)
+@OptIn(FlowPreview::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class HabitViewModel
     @Inject
@@ -128,9 +186,7 @@ class HabitViewModel
         private val contextRepository: ContextRepository,
         private val habitRepository: HabitRepository,
         private val habitEngine: HabitEngine,
-        private val predictionEngine: PredictionEngine,
         private val baselineBuilder: BaselineBuilder,
-        private val deviationDetector: DeviationDetector,
         private val usageDataCollector: UsageDataCollector,
         private val appIdentityResolver: AppIdentityResolver,
         private val exportManager: com.habitminer.data.ExportManager,
@@ -141,6 +197,15 @@ class HabitViewModel
         private val labelContextCapture: com.habitminer.proactive.LabelContextCapture,
         private val importManager: com.habitminer.data.ImportManager,
         private val stepCounterMonitor: com.habitminer.collection.StepCounterMonitor,
+        private val usageIngestor: com.habitminer.collection.UsageIngestor,
+        private val analysisRepository: AnalysisRepository,
+        private val healthConnectSleep: com.habitminer.sources.HealthConnectSleep,
+        private val calendarBusy: com.habitminer.sources.CalendarBusy,
+        private val insightRepository: com.habitminer.repository.InsightRepository,
+        private val recordingControl: com.habitminer.collection.RecordingControl,
+        private val selfHealthRecorder: com.habitminer.collection.SelfHealthRecorder,
+        private val updateChecker: com.habitminer.update.UpdateChecker,
+        private val updateInstaller: com.habitminer.update.UpdateInstaller,
     ) : AndroidViewModel(application), HabitActions {
         private val _uiState = MutableStateFlow(HabitUiState(selectedHistoryDate = getStartOfDay()))
         val uiState: StateFlow<HabitUiState> = _uiState.asStateFlow()
@@ -152,17 +217,58 @@ class HabitViewModel
         private val syncMutex = Mutex()
         private val insightsRefresh = MutableSharedFlow<Unit>(replay = 0, extraBufferCapacity = 1)
 
+        /** Mood check settings changed: work out again whether it's due. */
+        private val moodChanged = MutableSharedFlow<Unit>(replay = 0, extraBufferCapacity = 1)
+
         private data class InsightsInputs(
             val usage: List<AppUsageEntity>,
             val snapshots: List<ContextSnapshotEntity>,
             val habits: List<DiscoveredHabitEntity>,
             val places: List<com.habitminer.data.PlaceEntity>,
+            val labels: List<com.habitminer.data.UserLabelEntity>,
         )
 
+        /** Periods you labelled (exams…), kept out of the "usual by now" comparison. */
+        private val labelledPeriods = MutableStateFlow<List<com.habitminer.analytics.LabelledPeriod>>(emptyList())
+
+        /** Kept apart from [_uiState] so observing it doesn't count as a screen watching. */
+        private val selectedHistoryDate = MutableStateFlow(getStartOfDay())
+
         init {
-            // checkPermissions() is called by MainActivity.onCreate() and onResume();
-            // avoid calling it a third time here to prevent triple-init on first launch (MINOR-2)
-            observeData()
+            // The observers (tickers, database queries, analysis refreshes) run only while a
+            // screen is collecting uiState, plus 5 seconds so rotation doesn't restart them.
+            // Before, they kept running with the app in the background for as long as the
+            // monitoring service kept the process alive.
+            viewModelScope.launch {
+                _uiState.subscriptionCount
+                    .map { it > 0 }
+                    .distinctUntilChanged()
+                    .transformLatest { active ->
+                        if (!active) delay(5_000L)
+                        emit(active)
+                    }
+                    .distinctUntilChanged()
+                    .collectLatest { active -> if (active) observeData() }
+            }
+            viewModelScope.launch {
+                insightRepository.settings.collect { settings -> _uiState.update { it.copy(insightSettings = settings) } }
+            }
+            viewModelScope.launch {
+                recordingControl.state.collect { rec -> _uiState.update { it.copy(recording = rec) } }
+            }
+            viewModelScope.launch(Dispatchers.IO) { loadWelcomeBack() }
+            val prefs = application.getSharedPreferences(PrefsKeys.PREFS_NAME, Context.MODE_PRIVATE)
+            val oldApp = runCatching { application.packageManager.getLaunchIntentForPackage(ORIGINAL_APP) != null }.getOrDefault(false)
+            _uiState.update {
+                it.copy(
+                    notificationAskDismissed = prefs.getBoolean(PrefsKeys.NOTIFICATION_ASK_DISMISSED, false),
+                    notificationAccessSkipped = prefs.getBoolean(PrefsKeys.NOTIFICATION_ACCESS_SKIPPED, false),
+                    oldAppInstalled = oldApp,
+                    showImportCard =
+                        !prefs.getBoolean(PrefsKeys.IMPORT_CARD_DISMISSED, false) && prefs.getLong(PrefsKeys.IMPORT_DONE_AT, 0L) == 0L &&
+                            (oldApp || prefs.getInt(PrefsKeys.DAYS_OF_DATA, 0) < 3),
+                )
+            }
         }
 
         override fun checkPermissions() {
@@ -192,14 +298,12 @@ class HabitViewModel
                 application.getSharedPreferences(PrefsKeys.PREFS_NAME, Context.MODE_PRIVATE)
                     .getBoolean(PrefsKeys.COLLECTION_ENABLED, true)
 
-            val hasRuntime =
-                buildList {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) add(android.Manifest.permission.ACTIVITY_RECOGNITION)
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(android.Manifest.permission.POST_NOTIFICATIONS)
-                }.all {
-                    androidx.core.content.ContextCompat.checkSelfPermission(application, it) ==
-                        android.content.pm.PackageManager.PERMISSION_GRANTED
-                }
+            fun granted(permission: String) =
+                androidx.core.content.ContextCompat.checkSelfPermission(application, permission) ==
+                    android.content.pm.PackageManager.PERMISSION_GRANTED
+            // Steps are needed from the start; notifications are asked for later, in context.
+            val hasRuntime = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || granted(android.Manifest.permission.ACTIVITY_RECOGNITION)
+            val canNotify = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || granted(android.Manifest.permission.POST_NOTIFICATIONS)
 
             // Permission may have just been granted on the permission screen.
             stepCounterMonitor.start()
@@ -208,6 +312,7 @@ class HabitViewModel
                     hasUsagePermission = hasUsage,
                     hasNotificationPermission = hasNotif,
                     hasRuntimePermissions = hasRuntime,
+                    canPostNotifications = canNotify,
                     retentionDays = retentionDays,
                     features = readFeatureSettings(),
                     stepSensorAvailable = stepCounterMonitor.hasSensor(),
@@ -219,6 +324,7 @@ class HabitViewModel
                 initialCollectionStarted = true
                 synchronizeUsageAndModel()
             }
+            viewModelScope.launch(Dispatchers.IO) { syncHealthConnect(force = false) }
         }
 
         override fun loadHistoricalData() {
@@ -235,22 +341,8 @@ class HabitViewModel
                 _uiState.update { it.copy(isLoading = true, isSyncing = true) }
                 try {
                     val application = getApplication<Application>()
-                    val count = contextRepository.getUsageCount()
-                    val lastTimestamp = contextRepository.getLastInsertedUsageTimestamp()
-                    val usages =
-                        when {
-                            count == 0 -> usageDataCollector.collectHistoricalData()
-                            else -> {
-                                val launcherPackages = appIdentityResolver.getLauncherPackages()
-                                val prevPkg = contextRepository.getLastUsedNonLauncherPackage(launcherPackages)
-                                usageDataCollector.collectUsageSince(
-                                    lastTimestamp ?: System.currentTimeMillis() - 24 * 60 * 60 * 1000L,
-                                    prevPkg,
-                                )
-                            }
-                        }
-                    if (usages.isNotEmpty()) contextRepository.insertAllAppUsage(usages)
-                    
+                    usageIngestor.ingest()
+
                     habitServiceManager.startServices()
 
                     val preferences = application.getSharedPreferences(PrefsKeys.PREFS_NAME, Context.MODE_PRIVATE)
@@ -267,6 +359,7 @@ class HabitViewModel
                     }
 
                     val revision = contextRepository.getModelRevision(getStartOfDay())
+                    insightsRefresh.tryEmit(Unit)
                     if (labelsChanged || preferences.getString("source_revision", null) != revision) {
                         refreshHabits()
                         preferences.edit()
@@ -313,6 +406,10 @@ class HabitViewModel
                 contextRepository.clearCollectedData()
                 habitRepository.clearModelData()
                 feedbackRepository.clearAll()
+                insightRepository.clearAll()
+                selfHealthRecorder.clearAll()
+                usageIngestor.reset()
+                analysisRepository.invalidate()
                 val application = getApplication<Application>()
                 application.getSharedPreferences(PrefsKeys.PREFS_NAME, Context.MODE_PRIVATE).edit()
                     .remove("source_revision")
@@ -353,24 +450,48 @@ class HabitViewModel
          */
         fun importData(uri: android.net.Uri) {
             viewModelScope.launch(Dispatchers.IO) {
-                _uiState.update { it.copy(exportMessage = "Importing your data…") }
-                val message =
+                val reading = "Importing your data…"
+                _uiState.update { it.copy(exportMessage = reading, importStatus = ImportStatus(running = true, message = reading)) }
+                val status =
                     try {
                         val r = importManager.importZip(uri)
-                        if (r.isEmpty) {
-                            "That file doesn't look like a HabitMiner export. Pick the .zip made by Export Data."
-                        } else {
-                            "Imported ${r.usage} app sessions, ${r.snapshots} surroundings readings, " +
-                                "${r.labels} labels and ${r.places} places. Rebuilding your routines…"
+                        when {
+                            r.hiddenNames ->
+                                ImportStatus(
+                                    false,
+                                    "This export was made with \"Hide app names\" on, so its app history can't be brought back. " +
+                                        "Export again with that switch off.",
+                                    ok = false,
+                                )
+                            r.isEmpty -> ImportStatus(false, "That file doesn't look like a HabitMiner export. Pick the .zip made by Export data.", ok = false)
+                            else ->
+                                ImportStatus(
+                                    false,
+                                    "Imported ${r.usage} app sessions, ${r.snapshots} surroundings readings, " +
+                                        "${r.labels} labels and ${r.places} places. Your routines are being rebuilt from them.",
+                                )
                         }
                     } catch (e: Exception) {
                         android.util.Log.e("HabitMiner", "Import failed", e)
-                        "Import failed: ${e.message ?: "unreadable file"}"
+                        ImportStatus(false, "Import failed: ${e.message ?: "the file couldn't be read"}", ok = false)
                     }
-                _uiState.update { it.copy(exportMessage = message) }
+                if (status.ok) {
+                    getApplication<Application>().getSharedPreferences(PrefsKeys.PREFS_NAME, Context.MODE_PRIVATE).edit()
+                        .putLong(PrefsKeys.IMPORT_DONE_AT, System.currentTimeMillis()).apply()
+                    // Imported sessions are split at midnight like everything read here.
+                    runCatching { usageIngestor.repairStored() }
+                }
+                _uiState.update { it.copy(exportMessage = status.message, importStatus = status) }
                 loadHistoricalData()
                 insightsRefresh.tryEmit(Unit)
             }
+        }
+
+        /** Hides the import card (and a finished import's result). */
+        override fun dismissImport() {
+            getApplication<Application>().getSharedPreferences(PrefsKeys.PREFS_NAME, Context.MODE_PRIVATE).edit()
+                .putBoolean(PrefsKeys.IMPORT_CARD_DISMISSED, true).apply()
+            _uiState.update { it.copy(showImportCard = false, importStatus = it.importStatus?.takeIf { s -> s.running }) }
         }
 
         override fun selectHistoryDate(timeInMillis: Long) {
@@ -381,23 +502,99 @@ class HabitViewModel
                 set(Calendar.SECOND, 0)
                 set(Calendar.MILLISECOND, 0)
             }.timeInMillis
+            selectedHistoryDate.value = startOfDay
             _uiState.update { it.copy(selectedHistoryDate = startOfDay) }
         }
 
         /**
-         * Records whether a deviation was expected or unusual. Stored by fingerprint because
-         * deviations are re-detected (and re-inserted) whenever today's data changes.
+         * Records whether a deviation was expected or unusual. Stored by key (date, kind and
+         * subject) because deviations are recomputed whenever the data changes.
          */
         override fun giveDeviationFeedback(
-            deviation: DeviationEntity,
+            key: String,
             value: String,
         ) {
             viewModelScope.launch(Dispatchers.IO) {
-                feedbackRepository.saveDeviationFeedback(
-                    AnalyticsMappers.fingerprint(deviation),
-                    value,
-                    labelContextCapture.captureJson(),
-                )
+                feedbackRepository.saveDeviationFeedback(key, value, labelContextCapture.captureJson())
+                analysisRepository.invalidate()
+                insightsRefresh.tryEmit(Unit)
+            }
+        }
+
+        override fun answerNap(
+            key: String,
+            asleep: Boolean,
+        ) {
+            viewModelScope.launch(Dispatchers.IO) {
+                feedbackRepository.saveNapAnswer(key, asleep, labelContextCapture.captureJson())
+                analysisRepository.invalidate()
+                insightsRefresh.tryEmit(Unit)
+                com.habitminer.proactive.Notifier.cancel(getApplication(), com.habitminer.proactive.Notifier.ID_NAP)
+            }
+        }
+
+        override fun saveNap(
+            start: Long,
+            end: Long,
+            replacing: List<String>,
+        ) {
+            viewModelScope.launch(Dispatchers.IO) {
+                feedbackRepository.saveNap(start, end, replacing, labelContextCapture.captureJson())
+                analysisRepository.invalidate()
+                insightsRefresh.tryEmit(Unit)
+                com.habitminer.proactive.Notifier.cancel(getApplication(), com.habitminer.proactive.Notifier.ID_NAP)
+            }
+        }
+
+        override fun removeNap(keys: List<String>) {
+            viewModelScope.launch(Dispatchers.IO) {
+                feedbackRepository.removeNap(keys)
+                analysisRepository.invalidate()
+                insightsRefresh.tryEmit(Unit)
+            }
+        }
+
+        override fun fixNight(
+            wakeDate: java.time.LocalDate,
+            start: Long,
+            end: Long,
+        ) = saveNightFix(wakeDate, start, end)
+
+        override fun markNotSleep(wakeDate: java.time.LocalDate) = saveNightFix(wakeDate, null, null)
+
+        override fun clearNightFix(wakeDate: java.time.LocalDate) {
+            viewModelScope.launch(Dispatchers.IO) {
+                feedbackRepository.clearSleepFix(wakeDate)
+                analysisRepository.invalidate()
+                insightsRefresh.tryEmit(Unit)
+            }
+        }
+
+        private fun saveNightFix(
+            wakeDate: java.time.LocalDate,
+            start: Long?,
+            end: Long?,
+        ) {
+            // What was shown before the fix, so exports can compare the estimate with your times.
+            val shown = _uiState.value.insights?.sleepNights?.firstOrNull { it.wakeDate == wakeDate }
+            val json = shown?.let { """{"shownStart":${it.sleepStart},"shownEnd":${it.wakeTime},"shownSource":"${it.source}"}""" }
+            viewModelScope.launch(Dispatchers.IO) {
+                feedbackRepository.saveSleepFix(wakeDate, start, end, json)
+                analysisRepository.invalidate()
+                insightsRefresh.tryEmit(Unit)
+            }
+        }
+
+        override fun labelPeriod(
+            key: String,
+            from: java.time.LocalDate,
+            value: String,
+        ) {
+            viewModelScope.launch(Dispatchers.IO) {
+                feedbackRepository.savePeriodLabel(key, value, from, java.time.LocalDate.now())
+                analysisRepository.invalidate()
+                insightsRefresh.tryEmit(Unit)
+                com.habitminer.proactive.Notifier.cancel(getApplication(), com.habitminer.proactive.Notifier.ID_PERIOD)
             }
         }
 
@@ -413,11 +610,236 @@ class HabitViewModel
 
         override fun answerCheckIn(option: com.habitminer.analytics.CheckInOption) {
             val promptedAt = _uiState.value.pendingCheckInPromptedAt
-            _uiState.update { it.copy(pendingCheckInPromptedAt = null) }
+            _uiState.update { it.copy(pendingCheckInPromptedAt = null, askMood = true) }
             viewModelScope.launch(Dispatchers.IO) {
                 feedbackRepository.saveCheckIn(option.key, promptedAt, labelContextCapture.captureJson())
                 com.habitminer.proactive.Notifier.cancelCheckIn(getApplication())
             }
+            offerTileOnce()
+        }
+
+        /** After the first check-in answered in the app, offer the "Log activity" Quick Settings tile once. */
+        private fun offerTileOnce() {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+            val app = getApplication<Application>()
+            val prefs = app.getSharedPreferences(PrefsKeys.PREFS_NAME, Context.MODE_PRIVATE)
+            if (prefs.getBoolean(PrefsKeys.TILE_OFFERED, false)) return
+            prefs.edit().putBoolean(PrefsKeys.TILE_OFFERED, true).apply()
+            runCatching {
+                app.getSystemService(android.app.StatusBarManager::class.java)?.requestAddTileService(
+                    android.content.ComponentName(app, com.habitminer.ui.LogActivityTileService::class.java),
+                    "Log activity",
+                    android.graphics.drawable.Icon.createWithResource(app, com.habitminer.R.drawable.ic_stat_habitminer),
+                    app.mainExecutor,
+                ) { }
+            }
+        }
+
+        override fun answerMood(
+            mood: Int?,
+            energy: Int?,
+        ) {
+            // The daily check is done for today either way, answered or skipped.
+            _uiState.update { it.copy(askMood = false, moodDue = false) }
+            if (mood == null && energy == null) {
+                getApplication<Application>().getSharedPreferences(PrefsKeys.PREFS_NAME, Context.MODE_PRIVATE).edit()
+                    .putString(PrefsKeys.MOOD_SKIPPED_ON, java.time.LocalDate.now().toString()).apply()
+                return
+            }
+            viewModelScope.launch(Dispatchers.IO) {
+                feedbackRepository.saveMood(mood, energy)
+                com.habitminer.proactive.Notifier.cancel(getApplication(), com.habitminer.proactive.Notifier.ID_MOOD)
+            }
+        }
+
+        private fun moodDue(
+            moods: List<com.habitminer.data.UserLabelEntity>,
+            now: Long,
+        ): Boolean {
+            val prefs = getApplication<Application>().getSharedPreferences(PrefsKeys.PREFS_NAME, Context.MODE_PRIVATE)
+            val zone = java.time.ZoneId.systemDefault()
+            val today = com.habitminer.analytics.TimeUtil.dateOf(now, zone)
+            return com.habitminer.analytics.MoodSchedule.due(
+                enabled = prefs.getBoolean(PrefsKeys.MOOD_CHECK_ENABLED, true),
+                minute = prefs.getInt(PrefsKeys.MOOD_CHECK_MINUTE, com.habitminer.analytics.MoodSchedule.DEFAULT_MINUTE),
+                answeredToday = moods.any { com.habitminer.analytics.TimeUtil.dateOf(it.timestamp, zone) == today },
+                skippedToday = prefs.getString(PrefsKeys.MOOD_SKIPPED_ON, null) == today.toString(),
+                now = now,
+                zone = zone,
+            )
+        }
+
+        // ---- Insights ----------------------------------------------------------------------
+
+        override fun insightFeedback(
+            key: String,
+            value: String?,
+        ) {
+            // Show the answer straight away; the refresh below confirms it from the database.
+            _uiState.update { s ->
+                val b = s.insights
+                val i = b?.insight
+                if (b != null && i != null && i.key == key) s.copy(insights = b.copy(insight = i.copy(feedback = value))) else s
+            }
+            viewModelScope.launch(Dispatchers.IO) {
+                insightRepository.feedback(key, value)
+                analysisRepository.invalidate()
+                insightsRefresh.tryEmit(Unit)
+                com.habitminer.proactive.Notifier.cancel(getApplication(), com.habitminer.proactive.Notifier.ID_INSIGHT)
+            }
+        }
+
+        override fun dismissInsightExplainer() = insightRepository.update { it.copy(explainerSeen = true) }
+
+        override fun hideInsight(key: String) {
+            insightRepository.hide(key, java.time.LocalDate.now())
+            _uiState.update { s ->
+                val b = s.insights
+                val i = b?.insight
+                if (b != null && i != null && i.key == key) s.copy(insights = b.copy(insight = i.copy(hidden = true))) else s
+            }
+        }
+
+        fun insightOpened(key: String) {
+            viewModelScope.launch(Dispatchers.IO) { insightRepository.markOpened(key) }
+        }
+
+        fun updateInsightSettings(change: (com.habitminer.repository.InsightSettings) -> com.habitminer.repository.InsightSettings) {
+            insightRepository.update(change)
+            // Turning a topic or insights off changes today's pick.
+            analysisRepository.invalidate()
+            insightsRefresh.tryEmit(Unit)
+        }
+
+        /** Seven days of HabitMiner's own battery use, from self-health samples and readings. */
+        private suspend fun selfHealthWeek(): List<com.habitminer.analytics.PowerModel.DayUse> {
+            val zone = java.time.ZoneId.systemDefault()
+            val today = java.time.LocalDate.now(zone)
+            val since = com.habitminer.analytics.TimeUtil.startOfDay(today.minusDays(7), zone)
+            val samples =
+                selfHealthRecorder.samplesSince(since - 60 * 60_000L).map {
+                    com.habitminer.analytics.PowerModel.Sample(
+                        time = it.timestamp,
+                        cpuMs = it.cpuUserMs + it.cpuSystemMs,
+                        wakelockMs = it.wakelockMs,
+                        sensorMs = it.sensorMs,
+                        radioMams = it.mobileMams + it.wifiMams + it.bluetoothMams,
+                        batteryLevel = it.batteryLevel,
+                        chargeCounterUah = it.chargeCounterUah,
+                    )
+                }
+            if (samples.size < 2) return emptyList()
+            val readings =
+                contextRepository.getSnapshotsSince(since).filter { it.sensingMs > 0 }
+                    .map { com.habitminer.analytics.PowerModel.Reading(it.timestamp, it.sensingMs, gyro = it.gyroEnergy > 0f) }
+            val days = (6L downTo 0L).map { today.minusDays(it) }
+            return com.habitminer.analytics.PowerModel.daily(samples, readings, selfHealthRecorder.sensorPower(), days, zone)
+        }
+
+        // ---- Recording: pause, break, sources --------------------------------------------
+
+        /** Pause recording until [untilMs], or until resumed when null. */
+        fun pauseRecording(untilMs: Long?) {
+            viewModelScope.launch(Dispatchers.IO) { recordingControl.pause(untilMs) }
+        }
+
+        fun resumeRecording() {
+            viewModelScope.launch(Dispatchers.IO) { recordingControl.resume() }
+        }
+
+        /** A break of [days] days from today: no notifications, and the days don't count as usual. */
+        fun startBreak(days: Int) {
+            val today = java.time.LocalDate.now()
+            val until = today.plusDays((days - 1).toLong())
+            recordingControl.startBreak(today, until)
+            viewModelScope.launch(Dispatchers.IO) {
+                feedbackRepository.savePeriodLabel("period|$today", com.habitminer.analytics.PeriodOption.HOLIDAY.key, today, until)
+                analysisRepository.invalidate()
+                insightsRefresh.tryEmit(Unit)
+            }
+        }
+
+        fun endBreak() {
+            val today = java.time.LocalDate.now()
+            val from = _uiState.value.recording.breakFrom
+            recordingControl.endBreak(today)
+            viewModelScope.launch(Dispatchers.IO) {
+                if (from != null) feedbackRepository.extendPeriod("period|$from", from, maxOf(from, today.minusDays(1)))
+                analysisRepository.invalidate()
+                insightsRefresh.tryEmit(Unit)
+                loadWelcomeBack()
+            }
+        }
+
+        fun setSources(change: (com.habitminer.collection.RecordingState) -> com.habitminer.collection.RecordingState) = recordingControl.setSources(change)
+
+        private suspend fun loadWelcomeBack() {
+            val zone = java.time.ZoneId.systemDefault()
+            val today = java.time.LocalDate.now(zone)
+            val (from, until) = recordingControl.pendingWelcomeBack(today) ?: return
+            val since = com.habitminer.analytics.TimeUtil.startOfDay(from.minusDays(14), zone)
+            val sessions = contextRepository.getUsageSince(since).filterNot { appIdentityResolver.isLauncher(it.packageName) }.map(AnalyticsMappers::session)
+            val unlocks = contextRepository.unlockTimesSince(since)
+            val summary = com.habitminer.analytics.BreakSummary.compute(sessions, unlocks, from, until, zone)
+            _uiState.update { it.copy(welcomeBack = summary) }
+        }
+
+        override fun downloadUpdate() {
+            val release = _uiState.value.update ?: return
+            viewModelScope.launch { updateInstaller.download(release) }
+        }
+
+        override fun installUpdate() {
+            val st = _uiState.value.installState
+            if (st !is com.habitminer.update.InstallState.Ready) return
+            if (!updateInstaller.canInstall()) updateInstaller.requestInstallPermission() else updateInstaller.install(st.file)
+        }
+
+        override fun skipUpdate() {
+            _uiState.value.update?.let { updateChecker.skip(it.tag) }
+            updateInstaller.reset()
+            _uiState.update { it.copy(update = null) }
+        }
+
+        override fun setUpdateChecks(enabled: Boolean) {
+            updateChecker.enabled = enabled
+            com.habitminer.update.UpdateWorker.schedule(getApplication(), enabled)
+            _uiState.update { it.copy(updateChecks = enabled) }
+        }
+
+        override fun checkForUpdates() {
+            _uiState.update { it.copy(updateCheckResult = "checking") }
+            viewModelScope.launch {
+                val found = withContext(Dispatchers.IO) { runCatching { updateChecker.check(force = true) }.getOrNull() }
+                _uiState.update {
+                    it.copy(
+                        update = found,
+                        updateCheckResult =
+                            when {
+                                found != null -> null
+                                updateChecker.lastCheckFailed -> "offline"
+                                else -> "latest"
+                            },
+                    )
+                }
+            }
+        }
+
+        override fun dismissWelcomeBack() {
+            recordingControl.welcomeBackShown()
+            _uiState.update { it.copy(welcomeBack = null) }
+        }
+
+        fun skipNotificationAccess() {
+            getApplication<Application>().getSharedPreferences(PrefsKeys.PREFS_NAME, Context.MODE_PRIVATE).edit()
+                .putBoolean(PrefsKeys.NOTIFICATION_ACCESS_SKIPPED, true).apply()
+            _uiState.update { it.copy(notificationAccessSkipped = true) }
+        }
+
+        override fun dismissNotificationAsk() {
+            getApplication<Application>().getSharedPreferences(PrefsKeys.PREFS_NAME, Context.MODE_PRIVATE).edit()
+                .putBoolean(PrefsKeys.NOTIFICATION_ASK_DISMISSED, true).apply()
+            _uiState.update { it.copy(notificationAskDismissed = true) }
         }
 
         // ---- Feature switches ------------------------------------------------------------
@@ -428,8 +850,15 @@ class HabitViewModel
                 checkIns = prefs.getBoolean(PrefsKeys.CHECKINS_ENABLED, true),
                 nudges = prefs.getBoolean(PrefsKeys.NUDGES_ENABLED, true),
                 digest = prefs.getBoolean(PrefsKeys.DIGEST_ENABLED, true),
+                deviationAlerts = prefs.getBoolean(PrefsKeys.DEVIATION_ALERTS_ENABLED, true),
                 places = wifiPlaceProvider.isEnabled() && wifiPlaceProvider.hasPermission(),
                 placesPermission = wifiPlaceProvider.hasPermission(),
+                healthConnect = healthConnectSleep.enabled,
+                healthConnectStatus = healthConnectSleep.status().name.lowercase(),
+                calendar = calendarBusy.enabled && calendarBusy.hasPermission(),
+                moodCheck = prefs.getBoolean(PrefsKeys.MOOD_CHECK_ENABLED, true),
+                moodMinute = prefs.getInt(PrefsKeys.MOOD_CHECK_MINUTE, com.habitminer.analytics.MoodSchedule.DEFAULT_MINUTE),
+                moodReminder = prefs.getBoolean(PrefsKeys.MOOD_REMINDER, false),
             )
         }
 
@@ -444,11 +873,72 @@ class HabitViewModel
 
         fun setCheckInsEnabled(enabled: Boolean) = setFlag(PrefsKeys.CHECKINS_ENABLED, enabled)
 
+        fun setMoodCheckEnabled(enabled: Boolean) {
+            setFlag(PrefsKeys.MOOD_CHECK_ENABLED, enabled)
+            moodChanged.tryEmit(Unit)
+        }
+
+        fun setMoodReminder(enabled: Boolean) = setFlag(PrefsKeys.MOOD_REMINDER, enabled)
+
+        fun setMoodMinute(minute: Int) {
+            getApplication<Application>().getSharedPreferences(PrefsKeys.PREFS_NAME, Context.MODE_PRIVATE)
+                .edit().putInt(PrefsKeys.MOOD_CHECK_MINUTE, minute).apply()
+            _uiState.update { it.copy(features = readFeatureSettings()) }
+            moodChanged.tryEmit(Unit)
+        }
+
         fun setNudgesEnabled(enabled: Boolean) = setFlag(PrefsKeys.NUDGES_ENABLED, enabled)
 
         fun setDigestEnabled(enabled: Boolean) = setFlag(PrefsKeys.DIGEST_ENABLED, enabled)
 
+        fun setDeviationAlertsEnabled(enabled: Boolean) = setFlag(PrefsKeys.DEVIATION_ALERTS_ENABLED, enabled)
+
         /** Call after the location permission result. Restarts the service so it gains the location type. */
+        /** The Health Connect permission to ask for. */
+        val healthConnectPermission: String get() = healthConnectSleep.permission
+
+        /** After the Health Connect permission screen: on when sleep access was granted. */
+        fun setHealthConnectEnabled(granted: Boolean) {
+            healthConnectSleep.enabled = granted
+            _uiState.update { it.copy(features = readFeatureSettings()) }
+            viewModelScope.launch(Dispatchers.IO) {
+                if (granted) {
+                    syncHealthConnect(force = true)
+                } else {
+                    feedbackRepository.clearHealthSleep()
+                    analysisRepository.invalidate()
+                    insightsRefresh.tryEmit(Unit)
+                }
+            }
+        }
+
+        /**
+         * Copies the last month of sleep from Health Connect. Health Connect only allows reads
+         * while the app is open, so this runs when you come back to the app, at most every 30 minutes.
+         */
+        private suspend fun syncHealthConnect(force: Boolean) {
+            if (!healthConnectSleep.enabled) return
+            val prefs = getApplication<Application>().getSharedPreferences(PrefsKeys.PREFS_NAME, Context.MODE_PRIVATE)
+            val now = System.currentTimeMillis()
+            if (!force && now - prefs.getLong(PrefsKeys.HEALTH_CONNECT_SYNCED_AT, 0L) < 30 * 60_000L) return
+            if (!healthConnectSleep.hasPermission()) return
+            runCatching {
+                val sessions = healthConnectSleep.read(now - 32L * 24 * 60 * 60 * 1000, now)
+                feedbackRepository.replaceHealthSleep(com.habitminer.analytics.ExternalSleepMapper.map(sessions, java.time.ZoneId.systemDefault()))
+                prefs.edit().putLong(PrefsKeys.HEALTH_CONNECT_SYNCED_AT, now).apply()
+                analysisRepository.invalidate()
+                insightsRefresh.tryEmit(Unit)
+            }.onFailure { android.util.Log.w("HabitMiner", "Health Connect read failed", it) }
+        }
+
+        /** After the calendar permission prompt. */
+        fun setCalendarEnabled(granted: Boolean) {
+            calendarBusy.enabled = granted
+            _uiState.update { it.copy(features = readFeatureSettings()) }
+            analysisRepository.invalidate()
+            insightsRefresh.tryEmit(Unit)
+        }
+
         fun setPlacesEnabled(enabled: Boolean) {
             wifiPlaceProvider.setEnabled(enabled && wifiPlaceProvider.hasPermission())
             _uiState.update { it.copy(features = readFeatureSettings()) }
@@ -475,27 +965,18 @@ class HabitViewModel
 
         private suspend fun refreshHabits() = withContext(Dispatchers.Default) {
             val startOfDay = getStartOfDay()
-            val allUsage = contextRepository.getAllUsage().first()
-            val todayUsage = contextRepository.getTodayUsage(startOfDay).first()
+            val windowStart = System.currentTimeMillis() - 90L * 24 * 60 * 60 * 1000
+            val allUsage = contextRepository.getUsageSince(windowStart)
             val historicalUsage = allUsage.filter { it.startTime < startOfDay }
 
-            // Baseline
-            val contextWindowStart = System.currentTimeMillis() - 90L * 24 * 60 * 60 * 1000
-            val snapshots = contextRepository.getSnapshotsSince(contextWindowStart)
+            val snapshots = contextRepository.getSnapshotsSince(windowStart)
             val newBaselines = baselineBuilder.buildBaseline(historicalUsage, snapshots.filter { it.timestamp < startOfDay })
-            newBaselines.forEach { habitRepository.insertBaseline(it) }
-
-            // Habits
             val habits = habitEngine.discoverHabits(historicalUsage)
-            habitRepository.deleteAllHabits()
-            habits.forEach { habitRepository.insertHabit(it) }
+            // One transaction: screens watching these tables refresh once, not per row.
+            habitRepository.replaceModel(newBaselines, habits)
 
             // Predictability
             val predictability = habitEngine.computePredictabilityScore(historicalUsage)
-
-            // Deviations
-            val todayContexts = snapshots.filter { it.timestamp >= startOfDay }
-            val deviationsResult = deviationDetector.detectDeviations(todayUsage, todayContexts, newBaselines)
 
             val daysOfData = baselineBuilder.getDaysOfData(allUsage)
             val existingBaselines = habitRepository.getAllBaselines().first()
@@ -512,318 +993,306 @@ class HabitViewModel
             }
         }
 
-        private fun observeData() {
-            viewModelScope.launch {
-                kotlinx.coroutines.supervisorScope {
-                    val startOfDayFlow =
-                        flow {
-                            while (currentCoroutineContext().isActive) {
-                                emit(getStartOfDay())
-                                delay(60_000L)
-                            }
-                        }.distinctUntilChanged()
+        /**
+         * Everything the screens show, kept current while a screen is visible. Suspends until
+         * cancelled (when no screen has watched for 5 seconds).
+         */
+        private suspend fun observeData() =
+            kotlinx.coroutines.supervisorScope {
+                val zone = java.time.ZoneId.systemDefault()
+                val startOfDayFlow =
+                    flow {
+                        while (currentCoroutineContext().isActive) {
+                            emit(getStartOfDay())
+                            delay(60_000L)
+                        }
+                    }.distinctUntilChanged()
 
-                    // Shared cache of all usage rows — updated by the debounced flow below.
-                    // The today-usage collector reads from this cache to avoid a full-table
-                    // scan on every DB write (CRITICAL-5).
-                    val allUsageCache = MutableStateFlow<List<AppUsageEntity>>(emptyList())
+                // Copy whatever happened since the last reading, so the numbers are current.
+                launch(Dispatchers.IO) { runCatching { usageIngestor.ingest(minIntervalMs = 30_000L) } }
 
-                    launch {
-                        startOfDayFlow.collectLatest { startOfDay ->
-                            contextRepository.getTodayUsage(startOfDay).collect { usage ->
-                                val (validUsage, totalTime, categories) =
-                                    withContext(Dispatchers.Default) {
-                                        val valid = usage.filterNot { appIdentityResolver.isLauncher(it.packageName) }
-                                        val byApp =
-                                            valid.groupBy { appIdentityResolver.getAppName(it.packageName) }
-                                                .mapValues { entry -> entry.value.sumOf { item -> item.durationMs } }
-                                        Triple(valid, valid.sumOf { it.durationMs }, byApp)
-                                    }
-                                val topCategory = categories.maxByOrNull { it.value }?.key.orEmpty()
+                // Five weeks of sessions, reloaded (ranged query) when today's usage changes.
+                val window = MutableStateFlow<List<AppUsageEntity>>(emptyList())
 
-                                _uiState.update {
-                                    it.copy(
-                                        todayScreenTimeMs = totalTime,
-                                        todayUsageByApp = categories.toImmutableMap(),
-                                        todayTopApp = topCategory,
-                                        todayAppUsage = usage.toImmutableList(),
-                                    )
+                launch {
+                    startOfDayFlow.collectLatest { startOfDay ->
+                        contextRepository.getTodayUsage(startOfDay).collect { usage ->
+                            val (totalTime, categories) =
+                                withContext(Dispatchers.Default) {
+                                    val valid = usage.filterNot { appIdentityResolver.isLauncher(it.packageName) }
+                                    val byApp =
+                                        valid.groupBy { appIdentityResolver.getAppName(it.packageName) }
+                                            .mapValues { entry -> entry.value.sumOf { item -> item.durationMs } }
+                                    valid.sumOf { it.durationMs } to byApp
                                 }
-
-                                if (validUsage.isNotEmpty()) {
-                                    val latest = validUsage.first()
-                                    // Use the cached all-usage list — avoids a full table scan here (CRITICAL-5)
-                                    val cachedAllUsage = allUsageCache.value
-                                    if (cachedAllUsage.isNotEmpty()) {
-                                        val predictions =
-                                            withContext(Dispatchers.Default) {
-                                                predictionEngine.predict(
-                                                    cachedAllUsage,
-                                                    appIdentityResolver.getAppName(latest.packageName),
-                                                    latest.timeSlot,
-                                                    latest.dayType,
-                                                )
-                                            }
-                                        _uiState.update { it.copy(predictions = predictions.toImmutableList()) }
-                                    }
-
-                                    // Evaluate today's deviations dynamically
-                                    withContext(Dispatchers.Default) {
-                                        val currentBaselines = habitRepository.getAllBaselines().first()
-                                        val todayContexts = contextRepository.getTodaySnapshots(startOfDay).first()
-                                        val deviationsResult = deviationDetector.detectDeviations(usage, todayContexts, currentBaselines)
-                                        habitRepository.deleteDeviationsSince(startOfDay)
-                                        deviationsResult.forEach { dev ->
-                                            habitRepository.insertDeviation(
-                                                com.habitminer.data.DeviationEntity(
-                                                    // When it happened, not when it was detected.
-                                                    timestamp = dev.occurredAt,
-                                                    timeBin = dev.timeBin,
-                                                    deviationType = dev.deviationType,
-                                                    description = dev.description,
-                                                    zScore = dev.zScore,
-                                                    normalizedScore = dev.normalizedScore,
-                                                    affectedCategory = dev.affectedCategory,
-                                                ),
-                                            )
-                                        }
-                                    }
-                                }
+                            _uiState.update {
+                                it.copy(
+                                    todayScreenTimeMs = totalTime,
+                                    todayUsageByApp = categories.toImmutableMap(),
+                                    todayTopApp = categories.maxByOrNull { e -> e.value }?.key.orEmpty(),
+                                    todayAppUsage = usage.toImmutableList(),
+                                )
                             }
+                            val since = com.habitminer.analytics.TimeUtil.startOfDay(
+                                java.time.LocalDate.now(zone).minusDays(InsightsComputer.LOOKBACK_DAYS),
+                                zone,
+                            )
+                            window.value = withContext(Dispatchers.IO) { contextRepository.getUsageSince(since) }
                         }
                     }
+                }
 
-                    launch {
-                        startOfDayFlow.collectLatest { startOfDay ->
-                            contextRepository.getTodaySnapshots(startOfDay).collect { snapshots ->
-                                _uiState.update { it.copy(todaySnapshots = snapshots.toImmutableList()) }
+                // Likely next apps, days of data and last update: only when the sessions change.
+                launch {
+                    window.collectLatest { usage ->
+                        if (usage.isEmpty()) return@collectLatest
+                        val today = java.time.LocalDate.now(zone)
+                        var daily: List<Pair<java.time.LocalDate, Long>> = emptyList()
+                        var apps: List<com.habitminer.analytics.AppSummary> = emptyList()
+                        val nowMs = System.currentTimeMillis()
+                        val notes =
+                            withContext(Dispatchers.IO) {
+                                contextRepository.getDeviceEventsSince(
+                                    com.habitminer.collection.DeviceEvents.NOTIFICATION,
+                                    nowMs - com.habitminer.analytics.NextAppModel.NOTIFIED_WINDOW_MS,
+                                ).mapNotNull { e -> e.packageName?.let { com.habitminer.analytics.NotificationEvent(e.timestamp, it) } }
                             }
-                        }
-                    }
-
-                    launch {
-                        habitRepository.getAllHabits().collect { habits ->
-                            _uiState.update { it.copy(discoveredHabits = habits.toImmutableList()) }
-                        }
-                    }
-
-                    launch {
-                        habitRepository.getAllBaselines().collect { baselines ->
-                            val cal = Calendar.getInstance()
-                            val day = cal.get(Calendar.DAY_OF_WEEK)
-                            val dayType = if (day == Calendar.SATURDAY || day == Calendar.SUNDAY) "WEEKEND" else "WEEKDAY"
-                            val expected = baselines.filter { it.timeBin.startsWith(dayType) }.sumOf { it.avgScreenTimeMs }
-                            _uiState.update { it.copy(expectedScreenTimeMs = expected) }
-                        }
-                    }
-
-                    launch {
-                        startOfDayFlow.collectLatest { startOfDay ->
-                            habitRepository.getTodayDeviations(startOfDay).collect { devs ->
-                                val overallScore = devs.maxOfOrNull { it.normalizedScore } ?: 0f
-                                _uiState.update { it.copy(todayDeviations = devs.toImmutableList(), overallDeviationScore = overallScore) }
+                        val situations =
+                            withContext(Dispatchers.IO) {
+                                contextRepository.situationSpans(nowMs - InsightsComputer.LOOKBACK_DAYS * 24 * 60 * 60 * 1000L, nowMs)
                             }
-                        }
-                    }
-
-                    launch {
-                        habitRepository.getRecentDeviations(20).collect { devs ->
-                            _uiState.update { it.copy(recentDeviations = devs.toImmutableList()) }
-                        }
-                    }
-
-                    // Unlock count recorded by our own receiver (only counts while the app is running).
-                    val snapshotUnlocks = MutableStateFlow(0)
-                    launch {
-                        contextRepository.getLatestSnapshot().collect { snapshot ->
-                            val isToday = snapshot != null && snapshot.timestamp >= getStartOfDay()
-                            snapshotUnlocks.value = if (isToday) snapshot!!.unlockCount else 0
-                            _uiState.update { it.copy(latestContext = snapshot) }
-                        }
-                    }
-
-                    // Once-a-minute refresh of time-dependent values: "typical by now" comparison
-                    // and today's unlock count from the system event log.
-                    val minuteTicker =
-                        flow {
-                            while (currentCoroutineContext().isActive) {
-                                emit(System.currentTimeMillis())
-                                delay(60_000L)
+                        val (after, guesses) =
+                            withContext(Dispatchers.Default) {
+                                val sessions =
+                                    usage.filterNot { appIdentityResolver.isLauncher(it.packageName) }
+                                        .map(AnalyticsMappers::session)
+                                daily = com.habitminer.analytics.UsageSummaries.daily(sessions, 14, today, zone)
+                                apps = com.habitminer.analytics.UsageSummaries.apps(sessions, today, zone)
+                                com.habitminer.analytics.NextAppModel.currentApp(sessions) to
+                                    com.habitminer.analytics.NextAppModel.predict(sessions, nowMs, zone, notifications = notes, situations = situations)
                             }
+                        val days =
+                            withContext(Dispatchers.IO) {
+                                contextRepository.countDaysWithUsageSince(System.currentTimeMillis() - 90L * 24 * 60 * 60 * 1000)
+                            }
+                        _uiState.update {
+                            it.copy(
+                                predictions = guesses.toImmutableList(),
+                                predictionsAfter = after,
+                                dailyTotals = daily.toImmutableList(),
+                                appSummaries = apps.toImmutableList(),
+                                daysOfData = days,
+                                lastUsageUpdate = usage.maxOfOrNull { u -> u.endTime },
+                            )
                         }
-                    launch {
-                        combine(allUsageCache, minuteTicker, snapshotUnlocks) { usage, now, recorded ->
-                            Triple(usage, now, recorded)
-                        }.collectLatest { (usage, now, recorded) ->
+                    }
+                }
+
+                launch {
+                    startOfDayFlow.collectLatest { startOfDay ->
+                        contextRepository.getTodaySnapshots(startOfDay).collect { snapshots ->
+                            _uiState.update { it.copy(todaySnapshots = snapshots.toImmutableList()) }
+                        }
+                    }
+                }
+
+                launch {
+                    habitRepository.getAllHabits().collect { habits ->
+                        _uiState.update { it.copy(discoveredHabits = habits.toImmutableList()) }
+                    }
+                }
+
+                launch {
+                    habitRepository.getAllBaselines().collect { baselines ->
+                        val cal = Calendar.getInstance()
+                        val day = cal.get(Calendar.DAY_OF_WEEK)
+                        val dayType = if (day == Calendar.SATURDAY || day == Calendar.SUNDAY) "WEEKEND" else "WEEKDAY"
+                        val expected = baselines.filter { it.timeBin.startsWith(dayType) }.sumOf { it.avgScreenTimeMs }
+                        _uiState.update { it.copy(expectedScreenTimeMs = expected) }
+                    }
+                }
+
+                launch {
+                    contextRepository.getLatestSnapshot().collect { snapshot ->
+                        _uiState.update { it.copy(latestContext = snapshot) }
+                    }
+                }
+
+                // "Usual by now" and today's unlocks: every 5 minutes and when the data changes.
+                // (This ran every minute over every stored session.)
+                val fiveMinutes =
+                    flow {
+                        while (currentCoroutineContext().isActive) {
+                            emit(System.currentTimeMillis())
+                            delay(5 * 60_000L)
+                        }
+                    }
+                launch {
+                    combine(window, fiveMinutes, labelledPeriods) { usage, now, periods -> Triple(usage, now, periods) }
+                        .collectLatest { (usage, _, periods) ->
+                            val now = System.currentTimeMillis()
                             val typical =
                                 withContext(Dispatchers.Default) {
+                                    val excluded =
+                                        periods.flatMap { p ->
+                                            generateSequence(p.from) { it.plusDays(1) }.takeWhile { !it.isAfter(p.to) }
+                                                .map { com.habitminer.analytics.TimeUtil.startOfDay(it, zone) }.toList()
+                                        }.toSet()
                                     TypicalUsageCalculator.compute(
                                         usage
                                             .filterNot { appIdentityResolver.isLauncher(it.packageName) }
                                             .map { TypicalUsageCalculator.Interval(it.startTime, it.endTime, it.durationMs) },
                                         now,
+                                        excludedDayStarts = excluded,
                                     )
                                 }
-                            val systemUnlocks =
-                                if (_uiState.value.hasUsagePermission) {
-                                    withContext(Dispatchers.IO) {
-                                        runCatching { usageDataCollector.countUnlocksSince(getStartOfDay()) }.getOrNull()
-                                    }
-                                } else {
-                                    null
-                                }
-                            _uiState.update {
-                                it.copy(
-                                    typicalUsage = typical,
-                                    todayUnlocks = maxOf(recorded, systemUnlocks ?: 0),
-                                )
-                            }
-                        }
-                    }
-
-                    launch {
-                        stepCounterMonitor.stepsToday.collect { steps ->
-                            _uiState.update { it.copy(stepsToday = steps) }
-                        }
-                    }
-
-                    launch {
-                        // Resets "steps today" after midnight even if no new steps arrive.
-                        startOfDayFlow.collect { stepCounterMonitor.refreshDay() }
-                    }
-
-                    launch {
-                        contextRepository.getLatestSnapshotWithSensors().collect { snapshot ->
-                            _uiState.update { it.copy(latestSensorContext = snapshot) }
-                        }
-                    }
-
-                    launch {
-                        feedbackRepository.getAllLabels().collect { labels ->
-                            val feedback =
-                                labels.filter { it.kind == com.habitminer.data.UserLabelEntity.KIND_DEVIATION_FEEDBACK && it.refKey != null }
-                                    .associate { it.refKey!! to it.value }
-                            _uiState.update {
-                                it.copy(
-                                    deviationFeedback = feedback.toImmutableMap(),
-                                    checkInCount = labels.count { l -> l.kind == com.habitminer.data.UserLabelEntity.KIND_CHECK_IN },
-                                    labelCount = labels.size,
-                                )
-                            }
-                        }
-                    }
-
-                    launch {
-                        feedbackRepository.getPlaces().collect { places ->
-                            _uiState.update { it.copy(places = places.toImmutableList()) }
-                        }
-                    }
-
-                    launch {
-                        startOfDayFlow.collectLatest { startOfDay ->
-                            contextRepository.getSensingMsSince(startOfDay).collect { ms ->
-                                val mode =
-                                    getApplication<Application>().getSharedPreferences(PrefsKeys.PREFS_NAME, Context.MODE_PRIVATE)
-                                        .getString(PrefsKeys.SENSING_MODE, null)
-                                _uiState.update { it.copy(sensingMsToday = ms, sensingModeName = mode) }
-                            }
-                        }
-                    }
-
-                    // Insights: recomputed when data changes, every 5 minutes, or on request.
-                    launch {
-                        val ticker =
-                            flow {
-                                while (currentCoroutineContext().isActive) {
-                                    emit(Unit)
-                                    delay(5 * 60_000L)
-                                }
-                            }
-                        combine(
-                            allUsageCache,
-                            contextRepository.getAllSnapshots(),
-                            habitRepository.getAllHabits(),
-                            feedbackRepository.getPlaces(),
-                            merge(ticker, insightsRefresh),
-                        ) { usage, snapshots, habits, places, _ ->
-                            InsightsInputs(usage, snapshots, habits, places)
-                        }.debounce(1_000L).collectLatest { inputs ->
-                            if (inputs.usage.isEmpty()) return@collectLatest
-                            val bundle =
+                            val dayStart = getStartOfDay()
+                            val unlockTimes = withContext(Dispatchers.IO) { contextRepository.unlockTimesSince(dayStart) }
+                            val phoneFree =
                                 withContext(Dispatchers.Default) {
-                                    runCatching {
-                                        insightsComputer.compute(inputs.usage, inputs.snapshots, inputs.habits, inputs.places)
-                                    }.onFailure { e -> android.util.Log.e("HabitMiner", "Insights failed", e) }.getOrNull()
+                                    val today = java.time.LocalDate.now(zone)
+                                    val bundle = analysisRepository.bundle.value
+                                    val todaySessions =
+                                        usage.filter { it.startTime >= dayStart && !appIdentityResolver.isLauncher(it.packageName) }
+                                            .map(AnalyticsMappers::session)
+                                    val firstUse = (todaySessions.map { it.start } + unlockTimes).minOrNull()
+                                    val awakeFrom = bundle?.lastNight?.takeIf { it.wakeDate == today }?.wakeTime ?: firstUse
+                                    val naps = bundle?.confirmedNaps.orEmpty().filter { (s, _) -> s >= dayStart }
+                                    awakeFrom?.let { com.habitminer.analytics.PhoneFree.longestToday(todaySessions, unlockTimes, it, now, naps) }
                                 }
-                            if (bundle != null) _uiState.update { it.copy(insights = bundle) }
+                            _uiState.update { it.copy(typicalUsage = typical, todayUnlocks = unlockTimes.size, phoneFree = phoneFree) }
                         }
-                    }
+                }
 
-                    // Historical Data observation
-                    launch {
-                        _uiState.map { it.selectedHistoryDate }
-                            .distinctUntilChanged()
-                            .collectLatest { date ->
-                                val endOfDay = date + 24 * 60 * 60 * 1000L - 1L
-                                val usage = contextRepository.getUsageForDateRange(date, endOfDay)
-                                _uiState.update { it.copy(historicalAppUsage = usage.toImmutableList()) }
-                            }
+                launch {
+                    stepCounterMonitor.stepsToday.collect { steps ->
+                        _uiState.update { it.copy(stepsToday = steps) }
                     }
+                }
 
-                    launch {
-                        _uiState.map { it.selectedHistoryDate }
-                            .distinctUntilChanged()
-                            .collectLatest { date ->
-                                val endOfDay = date + 24 * 60 * 60 * 1000L - 1L
-                                val snaps = contextRepository.getSnapshotsForDateRange(date, endOfDay)
-                                _uiState.update { it.copy(historicalSnapshots = snaps.toImmutableList()) }
-                            }
+                launch {
+                    // Resets "steps today" after midnight even if no new steps arrive.
+                    startOfDayFlow.collect { stepCounterMonitor.refreshDay() }
+                }
+
+                launch {
+                    contextRepository.getLatestSnapshotWithSensors().collect { snapshot ->
+                        _uiState.update { it.copy(latestSensorContext = snapshot) }
                     }
+                }
 
-                    launch {
-                        contextRepository.getAllUsage().debounce(300).collect { usage ->
-                            // Update the shared cache so today-usage collector can use it without re-querying (CRITICAL-5)
-                            allUsageCache.value = usage
-                            val days = withContext(Dispatchers.Default) { baselineBuilder.getDaysOfData(usage) }
-                            val lastUpdate = usage.maxOfOrNull { it.endTime }
-                            _uiState.update { it.copy(daysOfData = days, lastUsageUpdate = lastUpdate) }
-                        }
-                    }
-
-                    launch {
-                        contextRepository.getUsageCountFlow().collect { count ->
-                            _uiState.update { it.copy(usageRecordCount = count) }
-                        }
-                    }
-
-                    launch {
-                        contextRepository.getHistoricalUsageCountFlow().collect { count ->
-                            _uiState.update { it.copy(historicalUsageRecordCount = count) }
-                        }
-                    }
-
-                    launch {
-                        contextRepository.getLiveUsageCountFlow().collect { count ->
-                            _uiState.update { it.copy(liveUsageRecordCount = count) }
-                        }
-                    }
-
-                    launch {
-                        contextRepository.getSnapshotCountFlow().collect { count ->
-                            _uiState.update { it.copy(contextRecordCount = count) }
-                        }
-                    }
-
-                    launch {
-                        com.habitminer.collection.MonitoringService.isServiceRunning.collectLatest { isRunning ->
-                            _uiState.update {
-                                it.copy(isMonitoringServiceActive = isRunning)
-                            }
+                launch {
+                    feedbackRepository.getAllLabels().collect { labels ->
+                        labelledPeriods.value = LabelMappers.periods(labels)
+                        val feedback =
+                            labels.filter { it.kind == com.habitminer.data.UserLabelEntity.KIND_DEVIATION_FEEDBACK && it.refKey != null }
+                                .associate { it.refKey!! to it.value }
+                        _uiState.update {
+                            it.copy(
+                                deviationFeedback = feedback.toImmutableMap(),
+                                checkInCount = labels.count { l -> l.kind == com.habitminer.data.UserLabelEntity.KIND_CHECK_IN },
+                                labelCount = labels.size,
+                            )
                         }
                     }
                 }
+
+                launch {
+                    feedbackRepository.getPlaces().collect { places ->
+                        _uiState.update { it.copy(places = places.toImmutableList()) }
+                    }
+                }
+
+                // App updates: the daily check also runs when the app opens, if a day has passed.
+                launch {
+                    _uiState.update { it.copy(updateChecks = updateChecker.enabled, installedVersion = updateChecker.installedName, update = updateChecker.pending()) }
+                    val found = withContext(Dispatchers.IO) { runCatching { updateChecker.check() }.getOrNull() }
+                    _uiState.update { it.copy(update = found) }
+                }
+                launch { updateInstaller.state.collect { st -> _uiState.update { it.copy(installState = st) } } }
+
+                // HabitMiner's own battery use, last 7 days (today last).
+                launch {
+                    fiveMinutes.collect {
+                        val week = withContext(Dispatchers.IO) { runCatching { selfHealthWeek() }.getOrDefault(emptyList()) }
+                        _uiState.update { it.copy(selfHealth = week.toImmutableList()) }
+                    }
+                }
+
+                launch {
+                    startOfDayFlow.collectLatest { startOfDay ->
+                        contextRepository.getSensingMsSince(startOfDay).collect { ms ->
+                            val mode =
+                                getApplication<Application>().getSharedPreferences(PrefsKeys.PREFS_NAME, Context.MODE_PRIVATE)
+                                    .getString(PrefsKeys.SENSING_MODE, null)
+                            _uiState.update { it.copy(sensingMsToday = ms, sensingModeName = mode) }
+                        }
+                    }
+                }
+
+                // The daily mood check: due from its time until answered or skipped.
+                launch {
+                    combine(fiveMinutes, feedbackRepository.getMoods(), moodChanged.onStart { emit(Unit) }) { _, moods, _ -> moods }
+                        .collect { moods ->
+                            val due = withContext(Dispatchers.IO) { moodDue(moods, System.currentTimeMillis()) }
+                            _uiState.update { it.copy(moodDue = due) }
+                        }
+                }
+
+                // The shared analysis: shown as soon as anyone (screen or background) computes it,
+                // refreshed when sessions change, every 5 minutes, or on request.
+                launch {
+                    analysisRepository.bundle.collect { bundle ->
+                        if (bundle != null) _uiState.update { it.copy(insights = bundle) }
+                    }
+                }
+                launch {
+                    merge(window.map { }, fiveMinutes.map { }, insightsRefresh)
+                        .debounce(1_000L)
+                        .collectLatest { analysisRepository.get() }
+                }
+
+                launch {
+                    selectedHistoryDate.collectLatest { date ->
+                        val endOfDay = date + 24 * 60 * 60 * 1000L - 1L
+                        val usage = contextRepository.getUsageForDateRange(date, endOfDay)
+                        val snaps = contextRepository.getSnapshotsForDateRange(date, endOfDay)
+                        _uiState.update {
+                            it.copy(historicalAppUsage = usage.toImmutableList(), historicalSnapshots = snaps.toImmutableList())
+                        }
+                    }
+                }
+
+                launch {
+                    contextRepository.getUsageCountFlow().collect { count ->
+                        _uiState.update { it.copy(usageRecordCount = count) }
+                    }
+                }
+
+                launch {
+                    contextRepository.getHistoricalUsageCountFlow().collect { count ->
+                        _uiState.update { it.copy(historicalUsageRecordCount = count) }
+                    }
+                }
+
+                launch {
+                    contextRepository.getLiveUsageCountFlow().collect { count ->
+                        _uiState.update { it.copy(liveUsageRecordCount = count) }
+                    }
+                }
+
+                launch {
+                    contextRepository.getSnapshotCountFlow().collect { count ->
+                        _uiState.update { it.copy(contextRecordCount = count) }
+                    }
+                }
+
+                launch {
+                    com.habitminer.collection.MonitoringService.isServiceRunning.collectLatest { isRunning ->
+                        _uiState.update { it.copy(isMonitoringServiceActive = isRunning) }
+                    }
+                }
             }
-        }
 
         private fun getStartOfDay(): Long {
             val cal = Calendar.getInstance()
@@ -845,6 +1314,9 @@ class HabitViewModel
                 contextRepository.clearCollectedData()
                 habitRepository.clearModelData()
                 feedbackRepository.clearAll()
+                insightRepository.clearAll()
+                usageIngestor.reset()
+                analysisRepository.invalidate()
 
                 // Clear all SharedPreferences caches
                 app.getSharedPreferences("sensor_prefs", Context.MODE_PRIVATE).edit().clear().commit()
@@ -857,3 +1329,6 @@ class HabitViewModel
             }
         }
     }
+
+/** The original HabitMiner app, which exports the ZIPs this app can import. */
+const val ORIGINAL_APP = "com.habitminer"

@@ -13,10 +13,10 @@ import androidx.room.PrimaryKey
 data class UserLabelEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val timestamp: Long,
-    /** [KIND_CHECK_IN] or [KIND_DEVIATION_FEEDBACK]. */
+    /** [KIND_CHECK_IN], [KIND_DEVIATION_FEEDBACK], [KIND_NAP] or [KIND_PERIOD]. */
     val kind: String,
     val value: String,
-    /** For deviation feedback: the deviation's fingerprint. */
+    /** Deviation fingerprint, nap key ("nap|start|end") or period key ("period|2026-10-04"). */
     val refKey: String? = null,
     /** When the prompt was shown, for check-ins answered from a notification. */
     val promptedAt: Long? = null,
@@ -28,5 +28,37 @@ data class UserLabelEntity(
         const val KIND_DEVIATION_FEEDBACK = "DEVIATION_FEEDBACK"
         const val FEEDBACK_EXPECTED = "EXPECTED"
         const val FEEDBACK_UNUSUAL = "UNUSUAL"
+
+        /** Answer to "were you asleep?": [NAP_ASLEEP] or [NAP_AWAKE]. */
+        const val KIND_NAP = "NAP"
+        const val NAP_ASLEEP = "asleep"
+        const val NAP_AWAKE = "awake"
+
+        /** A nap answer replaced by times you set yourself (an edited nap). */
+        const val NAP_EDITED = "edited"
+
+        /**
+         * What a stretch of unusual days was (exams, travel…). contextJson holds
+         * {"from": "2026-10-04", "until": "2026-10-09"}; until grows while the change lasts.
+         */
+        const val KIND_PERIOD = "PERIOD"
+
+        /**
+         * Your own times for a night (Extended). refKey "sleep|<wake date>", value
+         * "<start ms>|<end ms>" or [SLEEP_NONE] for "that wasn't sleep". contextJson holds what
+         * was shown before, so the export can compare estimate and correction.
+         */
+        const val KIND_SLEEP_FIX = "SLEEP_FIX"
+        const val SLEEP_NONE = "none"
+
+        /**
+         * A sleep session copied from Health Connect (opt-in, Extended). value "<start>|<end>",
+         * refKey "hc|<start>", contextJson {"nap":true|false,"awake":[[a,b],…]}. Replaced on
+         * every sync; your own fixes win over them.
+         */
+        const val KIND_SLEEP_HEALTH = "SLEEP_HEALTH_CONNECT"
+
+        /** How you felt after a check-in (Extended): value "mood=1..5;energy=1..5", either may be missing. */
+        const val KIND_MOOD = "MOOD"
     }
 }

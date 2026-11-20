@@ -9,9 +9,20 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import com.habitminer.analytics.CheckInOption
 import com.habitminer.analytics.TimeUtil
-import com.habitminer.data.DeviationEntity
+import com.habitminer.analytics.UsageSummaries
 import com.habitminer.engine.HabitActions
+import com.habitminer.goals.Goals
+import com.habitminer.ui.goals.GoalsScreen
+import com.habitminer.ui.sleep.SleepScreen
+import com.habitminer.ui.status.StatusNavigation
+import com.habitminer.ui.status.StatusScreen
 import com.habitminer.ui.theme.HabitMinerTheme
+import com.habitminer.ui.today.TodayNavigation
+import com.habitminer.ui.today.TodayScreen
+import com.habitminer.ui.trends.AppDetailContent
+import com.habitminer.ui.trends.AppDetailState
+import com.habitminer.ui.trends.TrendsScreen
+import com.habitminer.ui.trends.TrendsTab
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -23,12 +34,12 @@ import java.io.File
 import java.util.TimeZone
 
 /**
- * Renders each main screen with realistic sample data and saves a PNG to
- * app/build/screenshots. CI publishes them to the `ci-screenshots` branch for review.
+ * Renders each main screen with realistic sample data, in light and dark, and saves a PNG to
+ * app/build/screenshots. CI publishes them with the APK for review.
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
-@Config(sdk = [34], qualifiers = "w411dp-h2400dp-xhdpi", application = Application::class)
+@Config(sdk = [34], qualifiers = "w411dp-h2000dp-xhdpi", application = Application::class)
 class ScreenshotTest {
     @get:Rule
     val rule = createAndroidComposeRule<ComponentActivity>()
@@ -43,11 +54,36 @@ class ScreenshotTest {
         override fun dismissCheckIn() = Unit
 
         override fun giveDeviationFeedback(
-            deviation: DeviationEntity,
+            key: String,
+            value: String,
+        ) = Unit
+
+        override fun answerNap(
+            key: String,
+            asleep: Boolean,
+        ) = Unit
+
+        override fun labelPeriod(
+            key: String,
+            from: java.time.LocalDate,
             value: String,
         ) = Unit
 
         override fun selectHistoryDate(timeInMillis: Long) = Unit
+    }
+
+    private object NoNav : TodayNavigation, StatusNavigation {
+        override fun openSettings() = Unit
+
+        override fun openSleep() = Unit
+
+        override fun openApps() = Unit
+
+        override fun openChanges() = Unit
+
+        override fun openApp(packageName: String) = Unit
+
+        override fun openPermissions() = Unit
     }
 
     private lateinit var data: SampleData.Data
@@ -55,17 +91,19 @@ class ScreenshotTest {
     @Before
     fun setUp() {
         TimeZone.setDefault(TimeZone.getTimeZone(SampleData.zone))
-        // A Saturday evening, like the screenshots this redesign started from.
+        // A Saturday evening.
         val now = TimeUtil.at(java.time.LocalDate.of(2026, 10, 3), 18, 45, SampleData.zone)
         data = SampleData.build(now)
+        registerSensors()
     }
 
     private fun shoot(
         name: String,
+        dark: Boolean,
         content: @Composable () -> Unit,
     ) {
         rule.setContent {
-            HabitMinerTheme(darkTheme = true, dynamicColor = false) {
+            HabitMinerTheme(darkTheme = dark, wallpaperColors = false) {
                 Surface(color = MaterialTheme.colorScheme.background) { content() }
             }
         }
@@ -81,31 +119,209 @@ class ScreenshotTest {
     }
 
     @Test
-    fun today() = shoot("1_today") { HomeScreen(data.state, NoActions) }
+    fun todayLight() = shoot("01_today_light", dark = false) { TodayScreen(data.state, NoActions, NoNav, intention = "Finish the lab report", dailyTargetMinutes = 240, now = data.now) }
 
     @Test
-    fun todayWithCheckIn() =
-        shoot("2_today_checkin") {
-            HomeScreen(data.state.copy(pendingCheckInPromptedAt = data.now), NoActions)
+    fun todayDark() = shoot("02_today_dark", dark = true) { TodayScreen(data.state, NoActions, NoNav, now = data.now) }
+
+    @Test
+    fun todayCheckIn() = shoot("03_today_checkin", dark = false) { TodayScreen(data.state.copy(pendingCheckInPromptedAt = data.now), NoActions, NoNav, now = data.now) }
+
+    @Test
+    fun trendsOverview() = shoot("04_trends_overview", dark = true) { TrendsScreen(data.state, NoActions, TrendsTab.OVERVIEW, onOpenApp = {}) }
+
+    @Test
+    fun trendsApps() = shoot("05_trends_apps", dark = false) { TrendsScreen(data.state, NoActions, TrendsTab.APPS, onOpenApp = {}) }
+
+    @Test
+    fun trendsRoutines() = shoot("06_trends_routines", dark = false) { TrendsScreen(data.state, NoActions, TrendsTab.ROUTINES, onOpenApp = {}) }
+
+    @Test
+    fun trendsChanges() = shoot("07_trends_changes", dark = true) { TrendsScreen(data.state, NoActions, TrendsTab.CHANGES, onOpenApp = {}) }
+
+    @Test
+    fun trendsHistory() = shoot("08_trends_history", dark = false) { TrendsScreen(data.state, NoActions, TrendsTab.HISTORY, onOpenApp = {}) }
+
+    @Test
+    fun sleepLight() = shoot("09_sleep_light", dark = false) { SleepScreen(data.state, NoActions) }
+
+    @Test
+    fun sleepDark() = shoot("10_sleep_dark", dark = true) { SleepScreen(data.state, NoActions) }
+
+    @Test
+    fun goals() =
+        shoot("11_goals", dark = false) {
+            val apps = data.state.appSummaries
+            GoalsScreen(
+                goals =
+                    Goals(
+                        dailyTargetMinutes = 240,
+                        useLess = apps.take(2).map { it.packageName },
+                        useMore = apps.drop(5).take(1).map { it.packageName },
+                        reminderMinutes = 30,
+                        intention = "Finish the lab report",
+                        intentionDate = java.time.LocalDate.of(2026, 10, 3),
+                    ),
+                apps = apps,
+                dailyTotals = data.state.dailyTotals,
+                todayMs = data.state.todayScreenTimeMs,
+                onChange = {},
+                onOpenApp = {},
+            )
         }
 
     @Test
-    fun history() = shoot("3_history") { HistoryScreen(data.state, NoActions) }
+    fun status() = shoot("12_status", dark = true) { StatusScreen(data.state, NoNav) }
 
     @Test
-    fun insightsRoutines() = shoot("4_insights_routines") { InsightsScreen(data.state, NoActions, initialTab = 0) }
+    fun appDetail() =
+        shoot("13_app_detail", dark = false) {
+            val pkg = data.state.appSummaries.first().packageName
+            val detail = UsageSummaries.detail(data.sessions.filter { it.packageName == pkg }, emptyList(), java.time.LocalDate.of(2026, 10, 3), SampleData.zone)
+            AppDetailContent(pkg, AppDetailState(loading = false, detail = detail, routines = listOf("Snapchat → Telegram")), onBack = {})
+        }
 
     @Test
-    fun insightsDeviations() = shoot("5_insights_deviations") { InsightsScreen(data.state, NoActions, initialTab = 1) }
+    fun todayInsight() =
+        shoot("14_today_insight", dark = true) {
+            val insight =
+                com.habitminer.repository.TodayInsight(
+                    id = 1,
+                    key = "k",
+                    family = com.habitminer.analytics.InsightFamily.RECORDS,
+                    title = "4h 20m phone-free, your longest in 27 days",
+                    body = "From 08:10 to 12:30 today, without unlocking.",
+                    why = "Your longest stretch without using the phone while awake, against each day of the last four weeks.",
+                    effect = 2.5f,
+                    open = "trends",
+                    notifiedAt = null,
+                    feedback = null,
+                )
+            val state = data.state.copy(insights = data.state.insights?.copy(naps = emptyList(), insight = insight))
+            TodayScreen(state, NoActions, NoNav, now = data.now)
+        }
 
     @Test
-    fun insightsBlueprint() = shoot("6_insights_blueprint") { InsightsScreen(data.state, NoActions, initialTab = 2) }
+    fun todayMood() = shoot("15_today_mood", dark = false) { TodayScreen(data.state.copy(askMood = true), NoActions, NoNav, now = data.now) }
 
     @Test
-    fun health() {
-        // Robolectric devices have no sensors; register the five the app uses so the
-        // Health screen renders like it does on a phone.
-        // System services are per context, so register on both the app and the activity.
+    fun weeklyStory() =
+        shoot("16_weekly_story", dark = false) {
+            val story =
+                com.habitminer.analytics.WeeklyStoryBuilder.build(
+                    sessions = data.sessions,
+                    unlocks = data.unlocks,
+                    nights = data.state.insights?.sleepNights.orEmpty(),
+                    naps = data.state.insights?.confirmedNaps.orEmpty(),
+                    patterns = data.state.insights?.patternGroups.orEmpty(),
+                    dailyTargetMinutes = 240,
+                    useLess = data.state.appSummaries.take(1).map { it.packageName }.toSet(),
+                    today = java.time.LocalDate.of(2026, 10, 3),
+                    now = data.now,
+                    zone = SampleData.zone,
+                )
+            com.habitminer.ui.story.StoryContent(com.habitminer.ui.story.StoryState(loading = false, story = story), onBack = {})
+        }
+
+    @Test
+    fun weeklyStoryDark() =
+        shoot("17_weekly_story_dark", dark = true) {
+            val story =
+                com.habitminer.analytics.WeeklyStoryBuilder.build(
+                    sessions = data.sessions,
+                    unlocks = data.unlocks,
+                    nights = data.state.insights?.sleepNights.orEmpty(),
+                    naps = data.state.insights?.confirmedNaps.orEmpty(),
+                    patterns = data.state.insights?.patternGroups.orEmpty(),
+                    dailyTargetMinutes = 240,
+                    useLess = data.state.appSummaries.take(1).map { it.packageName }.toSet(),
+                    today = java.time.LocalDate.of(2026, 10, 3),
+                    now = data.now,
+                    zone = SampleData.zone,
+                )
+            com.habitminer.ui.story.StoryContent(com.habitminer.ui.story.StoryState(loading = false, story = story), onBack = {})
+        }
+
+    @Test
+    fun onboarding() =
+        shoot("18_onboarding", dark = true) {
+            com.habitminer.ui.PermissionScreen(
+                hasUsage = true,
+                hasRuntime = false,
+                hasNotification = false,
+                onRequestUsage = {},
+                onRuntimePermissionsGranted = {},
+                onRequestNotification = {},
+                onImport = {},
+            )
+        }
+
+    @Test
+    fun goalsDark() =
+        shoot("19_goals_dark", dark = true) {
+            val apps = data.state.appSummaries
+            com.habitminer.ui.goals.GoalsScreen(
+                goals = com.habitminer.goals.Goals(dailyTargetMinutes = 300, useLess = apps.take(2).map { it.packageName }, useMore = apps.drop(5).take(1).map { it.packageName }, reminderMinutes = 30),
+                apps = apps,
+                dailyTotals = data.state.dailyTotals,
+                todayMs = data.state.todayScreenTimeMs,
+                onChange = {},
+                onOpenApp = {},
+            )
+        }
+
+    @Test
+    fun todayImport() =
+        shoot("20_today_import", dark = false) {
+            TodayScreen(data.state.copy(showImportCard = true, oldAppInstalled = true), NoActions, NoNav, now = data.now)
+        }
+
+    @Test
+    fun todayImported() =
+        shoot("21_today_imported", dark = true) {
+            TodayScreen(
+                data.state.copy(
+                    importStatus =
+                        com.habitminer.engine.ImportStatus(
+                            running = false,
+                            message = "Imported 4,355 app sessions, 431 surroundings readings, 9 labels and 5 places. Your routines are being rebuilt from them.",
+                        ),
+                ),
+                NoActions,
+                NoNav,
+                now = data.now,
+            )
+        }
+
+    @Test
+    fun sleepDay() =
+        shoot("22_sleep_day", dark = true) {
+            val ins = data.state.insights!!
+            val date = java.time.LocalDate.of(2026, 10, 2)
+            val day = ins.sleepDays.first { it.date == date }
+            com.habitminer.ui.sleep.DaySleepContent(
+                day = day,
+                naps = ins.napRecords.filter { TimeUtil.dateOf(it.start, SampleData.zone) == date },
+                questions = emptyList(),
+                today = java.time.LocalDate.of(2026, 10, 3),
+                zone = SampleData.zone,
+                onFixNight = {},
+                onAddNap = {},
+                onEditNap = {},
+                onRemoveNap = {},
+                onAnswer = { _, _ -> },
+            )
+        }
+
+    @Test
+    fun todayMoodDaily() =
+        shoot("23_today_mood_daily", dark = true) {
+            val state = data.state.copy(moodDue = true, insights = data.state.insights?.copy(naps = emptyList()))
+            TodayScreen(state, NoActions, NoNav, now = data.now)
+        }
+
+    /** Robolectric devices have no sensors; register the five the app uses. */
+    private fun registerSensors() {
         val contexts =
             listOf<android.content.Context>(
                 androidx.test.core.app.ApplicationProvider.getApplicationContext<Application>(),
@@ -126,6 +342,5 @@ class ScreenshotTest {
                 }
             }
         }
-        shoot("7_health") { HealthScreen(data.state) }
     }
 }

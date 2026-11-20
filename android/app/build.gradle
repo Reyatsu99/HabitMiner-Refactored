@@ -4,19 +4,20 @@ plugins {
     id 'org.jetbrains.kotlin.plugin.compose'
     id 'com.google.devtools.ksp'     // Kotlin Symbol Processing for Room
     id 'com.google.dagger.hilt.android'
+    id 'androidx.room'
     id 'com.diffplug.spotless'
 }
 
 android {
     namespace 'com.habitminer'
-    compileSdk 35
+    compileSdk 36
 
     defaultConfig {
-        applicationId "com.habitminer"
+        applicationId "com.habitminer.extended"
         minSdk 26           // Android 8.0 — required for WorkManager background execution guarantees
-        targetSdk 34
-        versionCode 4
-        versionName "1.2.1"
+        targetSdk 35
+        versionCode((project.findProperty("vcode") ?: "200").toString().toInteger())
+        versionName((project.findProperty("vname") ?: "2.0.0-dev").toString())
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -43,13 +44,32 @@ android {
         }
     }
 
+    // Releases are signed with a private key from the environment (set by the release workflow).
+    // Without it the release build falls back to the shared debug key so CI can still build it.
+    def releaseKeystore = System.getenv("RELEASE_KEYSTORE_FILE")
+    if (releaseKeystore) {
+        signingConfigs {
+            release {
+                storeFile file(releaseKeystore)
+                storePassword System.getenv("RELEASE_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("RELEASE_KEY_ALIAS")
+                keyPassword System.getenv("RELEASE_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
+        // The build people install: R8-shrunk and non-debuggable, which is much faster than the
+        // debug build. Until the private release key is set up it is signed with the shared
+        // debug key so CI can produce it.
         release {
             minifyEnabled true
+            shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig releaseKeystore ? signingConfigs.release : signingConfigs.debug
         }
     }
 
@@ -58,9 +78,6 @@ android {
         targetCompatibility JavaVersion.VERSION_21
     }
 
-    kotlinOptions {
-        jvmTarget = '21'
-    }
 
     buildFeatures {
         compose true
@@ -73,9 +90,17 @@ android {
     }
 }
 
-// Export Room's schema so database migrations can be checked against it (see CI).
-ksp {
-    arg("room.schemaLocation", "$projectDir/schemas")
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21
+    }
+}
+
+// Export Room's schema so database migrations can be checked against it (see CI). The Room
+// plugin keeps each build variant's copy apart, so debug and release builds running at the same
+// time can't read each other's half-written schema file.
+room {
+    schemaDirectory("$projectDir/schemas")
 }
 
 spotless {
@@ -87,7 +112,7 @@ spotless {
 
 dependencies {
     // ==================== Jetpack Compose ====================
-    def composeBom = platform('androidx.compose:compose-bom:2025.03.01')
+    def composeBom = platform('androidx.compose:compose-bom:2025.12.00')
     implementation composeBom
     androidTestImplementation composeBom
 
@@ -95,28 +120,40 @@ dependencies {
     implementation 'androidx.compose.ui:ui-graphics'
     implementation 'androidx.compose.ui:ui-tooling-preview'
     implementation 'androidx.compose.material3:material3'
+    implementation 'androidx.compose.material3:material3-adaptive-navigation-suite'
+    implementation 'androidx.profileinstaller:profileinstaller:1.4.1'
     implementation 'androidx.compose.material:material-icons-extended'
-    implementation 'androidx.activity:activity-compose:1.8.2'
-    implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0'
-    implementation 'androidx.lifecycle:lifecycle-runtime-compose:2.7.0'
-    implementation 'androidx.navigation:navigation-compose:2.7.7'
+    implementation 'androidx.activity:activity-compose:1.9.3'
+    implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0'
+    implementation 'androidx.lifecycle:lifecycle-runtime-compose:2.10.0'
+    implementation 'androidx.navigation:navigation-compose:2.8.5'
 
     debugImplementation 'androidx.compose.ui:ui-tooling'
     debugImplementation 'androidx.compose.ui:ui-test-manifest'
 
     // ==================== Core AndroidX ====================
-    implementation 'androidx.core:core-ktx:1.12.0'
-    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.7.0'
-    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'androidx.core:core-ktx:1.15.0'
+    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.10.0'
+    implementation 'androidx.appcompat:appcompat:1.7.0'
 
     // ==================== Room Database ====================
-    def room_version = "2.6.1"
+    // Still / walking / in-vehicle changes (low-power, change-only broadcasts).
+    implementation "com.google.android.gms:play-services-location:21.3.0"
+
+    // Home-screen widget.
+    implementation "androidx.glance:glance-appwidget:1.1.1"
+    implementation "androidx.glance:glance-material3:1.1.1"
+
+    // Opt-in, read-only sleep from Health Connect.
+    implementation "androidx.health.connect:connect-client:1.1.0"
+
+    def room_version = "2.8.3"
     implementation "androidx.room:room-runtime:$room_version"
     implementation "androidx.room:room-ktx:$room_version"         // Coroutines support for Room
     ksp "androidx.room:room-compiler:$room_version"               // KSP annotation processor
 
     // ==================== WorkManager ====================
-    implementation 'androidx.work:work-runtime-ktx:2.9.0'
+    implementation 'androidx.work:work-runtime-ktx:2.10.0'
 
     // ==================== Data Serialization ====================
     implementation 'com.google.code.gson:gson:2.10.1'
@@ -125,7 +162,7 @@ dependencies {
     implementation 'org.jetbrains.kotlinx:kotlinx-collections-immutable:0.3.7'
 
     // ==================== Coroutines ====================
-    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.1'
 
     // ==================== Testing ====================
     testImplementation 'junit:junit:4.13.2'
@@ -138,15 +175,15 @@ dependencies {
     // Screenshot tests: render Compose screens on the JVM with Robolectric (native graphics)
     testImplementation composeBom
     testImplementation 'androidx.compose.ui:ui-test-junit4'
-    testImplementation 'org.robolectric:robolectric:4.14.1'
+    testImplementation 'org.robolectric:robolectric:4.16'
     testImplementation 'androidx.test.ext:junit:1.1.5'
 
     // Room test helpers
     testImplementation "androidx.room:room-testing:$room_version"
 
     // ==================== Dependency Injection ====================
-    implementation 'com.google.dagger:hilt-android:2.51.1'
-    ksp 'com.google.dagger:hilt-compiler:2.51.1'
+    implementation 'com.google.dagger:hilt-android:2.57.2'
+    ksp 'com.google.dagger:hilt-compiler:2.57.2'
     implementation 'androidx.hilt:hilt-navigation-compose:1.2.0'
 
     // ==================== Hilt WorkManager ====================
