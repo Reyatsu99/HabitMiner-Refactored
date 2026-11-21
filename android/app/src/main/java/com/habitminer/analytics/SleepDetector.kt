@@ -154,6 +154,9 @@ data class SleepEstimate(
     val source: SleepSource = SleepSource.PHONE,
     /** Times the lock screen was looked at without unlocking, during the night. */
     val glances: Int = 0,
+    /** The package of [lastAppBeforeSleep], and whether it's a social, video or game app. */
+    val lastPackageBeforeSleep: String? = null,
+    val lastAppLeisure: Boolean = false,
 ) {
     /** Time asleep: from falling asleep to waking up, minus the brief wake-ups. */
     val durationMs: Long get() = (wakeTime - sleepStart - briefWakes.sumOf { it.end - it.start }).coerceAtLeast(0L)
@@ -599,8 +602,13 @@ object SleepDetector {
         }
         val darkShare = if (knownLight >= 5 * TimeUtil.MINUTE) dark.toFloat() / knownLight else null
 
-        val lastApp = sessions.filter { it.end <= sleepStart + TimeUtil.MINUTE }.maxByOrNull { it.end }?.appName
-        val firstApp = sessions.filter { it.start >= wakeTime - TimeUtil.MINUTE }.minByOrNull { it.start }?.appName
+        // The alarm clock and system screens aren't what you chose to use: setting an alarm last
+        // thing at night, or switching it off first thing, says nothing about your habits.
+        fun chosen(s: UsageSession) = !AlarmApps.isAlarmApp(s.packageName, s.appName) && !CategoryMapper.isSystemNoise(s.packageName, s.appName)
+        val last = sessions.filter { it.end <= sleepStart + TimeUtil.MINUTE && chosen(it) }.maxByOrNull { it.end }
+        val first = sessions.filter { it.start >= wakeTime - TimeUtil.MINUTE && chosen(it) }.minByOrNull { it.start }
+        val lastApp = last?.appName
+        val firstApp = first?.appName
 
         return SleepEstimate(
             wakeDate = wakeDate,
@@ -610,6 +618,8 @@ object SleepDetector {
             preSleepUseMs = preUse,
             preSleepDarkShare = darkShare,
             lastAppBeforeSleep = lastApp,
+            lastPackageBeforeSleep = last?.packageName,
+            lastAppLeisure = last?.category?.isLeisure == true,
             firstAppAfterWake = firstApp,
             briefWakes = markedWakes,
             evidence = evidence,

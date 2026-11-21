@@ -25,7 +25,7 @@ data class PlaceUsage(
 
 /**
  * Joins each app session with the nearest context snapshot and turns the result into
- * a handful of readable insights ("45% of your Evony time is in the dark").
+ * a handful of readable insights ("45% of your Instagram time is in the dark").
  */
 object ContextInsights {
     private const val MIN_APP_MS = 20 * TimeUtil.MINUTE

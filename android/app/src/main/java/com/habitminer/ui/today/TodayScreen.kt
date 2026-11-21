@@ -10,6 +10,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -172,54 +175,13 @@ fun TodayScreen(
             DayRibbonBuilder.build(todaySessions, insights?.typicalDay, lastNight, todayNaps, today, now, zone)
         }
 
+    val stories = rememberTodayStories(state, today, lastNight, zone, nav)
+
     LazyColumn(modifier = modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 32.dp)) {
         item(key = "top") { TopLine(today, nav::openSettings) }
 
         // Stories, like Instagram's: today's insights, last night, and your week.
-        item(key = "stories") {
-            val context = androidx.compose.ui.platform.LocalContext.current
-            var openSlides by remember { androidx.compose.runtime.mutableStateOf<List<com.habitminer.analytics.StorySlide>?>(null) }
-            var seenTick by remember { androidx.compose.runtime.mutableIntStateOf(0) }
-            val todayStamp = today.toString()
-            val weekStamp = today.with(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY)).toString()
-            val todaySlides = remember(insights?.patterns, today) { com.habitminer.analytics.Explainer.today(insights?.patterns.orEmpty(), today) }
-            val nightSlides =
-                remember(lastNight, insights?.sleepWeek) {
-                    lastNight?.let { n ->
-                        com.habitminer.analytics.Explainer.lastNight(
-                            n,
-                            insights?.sleepWeek?.avgNightMs?.takeIf { it > 0 },
-                            insights?.sleepWeek?.avgBedtimeMinutes ?: insights?.sleepSummary?.avgBedtimeMinutes,
-                            zone,
-                        )
-                    }.orEmpty()
-                }
-            val bubbles =
-                remember(todaySlides, nightSlides, seenTick, todayStamp) {
-                    buildList {
-                        if (todaySlides.isNotEmpty()) {
-                            add(StoryBubble("today", "Today", StoryIcons.today, com.habitminer.analytics.StoryTone.CALM, StorySeen.seen(context, "today", todayStamp + todaySlides.size), todaySlides))
-                        }
-                        if (nightSlides.isNotEmpty()) {
-                            add(StoryBubble("night", "Last night", StoryIcons.night, com.habitminer.analytics.StoryTone.SLEEP, StorySeen.seen(context, "night", todayStamp), nightSlides))
-                        }
-                        if (state.daysOfData >= 3) {
-                            add(StoryBubble("week", "Your week", StoryIcons.week, com.habitminer.analytics.StoryTone.SCREEN, StorySeen.seen(context, "week", weekStamp)))
-                        }
-                    }
-                }
-            StoryStrip(bubbles) { b ->
-                when (b.id) {
-                    "today" -> StorySeen.mark(context, "today", todayStamp + todaySlides.size)
-                    "night" -> StorySeen.mark(context, "night", todayStamp)
-                    "week" -> StorySeen.mark(context, "week", weekStamp)
-                }
-                seenTick++
-                if (b.slides.isEmpty()) nav.openStory() else openSlides = b.slides
-            }
-            openSlides?.let { slides -> StoryViewer(slides, onClose = { openSlides = null }, onOpenSleep = nav::openSleep) }
-        }
-
+        item(key = "stories") { StoryStrip(stories.bubbles, stories::open) }
         item(key = "hero") {
             TodayRings(state, dailyTargetMinutes, zone)
             Column(modifier = Modifier.padding(horizontal = ScreenPadding)) {
@@ -249,6 +211,14 @@ fun TodayScreen(
         item(key = "ribbon") {
             Spacer(Modifier.height(18.dp))
             DayRibbonChart(ribbon)
+        }
+
+        // Today's insight: the first of today's slides, in plain words; dims once read.
+        stories.today.firstOrNull()?.let { first ->
+            item(key = "today-insight") {
+                Spacer(Modifier.height(18.dp))
+                TodayInsightCard(first, more = stories.today.size - 1, read = stories.todaySeen) { stories.open(stories.bubbles.first { it.id == "today" }) }
+            }
         }
 
         state.recording.breakUntil?.takeIf { until -> state.recording.breakFrom?.let { !today.isBefore(it) } == true && !today.isAfter(until) }?.let { until ->
@@ -378,58 +348,6 @@ fun TodayScreen(
                         WidgetPromptPanel(onAdd = actions::pinWidget, onNotNow = actions::dismissWidgetPrompt)
                     }
                 }
-        }
-
-        item(key = "stats") {
-            val colors = LocalDataColors.current
-            Spacer(Modifier.height(16.dp))
-            TileRow {
-                MetricTile(
-                    icon = Icons.Rounded.DirectionsWalk,
-                    label = "Steps",
-                    value = if (state.stepsToday >= 0) grouped(state.stepsToday) else "–",
-                    hue = colors.stepsHue,
-                    caption = if (state.stepsToday < 0) (if (state.stepPermission) "from your next steps" else "needs permission") else "today",
-                    modifier = Modifier.weight(1f),
-                )
-                val pickups = insights?.pickupsToday?.takeIf { it.total > 0 }
-                MetricTile(
-                    icon = Icons.Rounded.NotificationsActive,
-                    label = "Notified",
-                    value = pickups?.let { Format.percent(it.notificationShare) } ?: "–",
-                    hue = colors.notificationsHue,
-                    caption = pickups?.let { "of pickups came right after a notification" } ?: "pickups after a notification",
-                    modifier = Modifier.weight(1f),
-                )
-            }
-        }
-
-
-        if (state.predictions.isNotEmpty()) {
-            item(key = "next-header") {
-                SectionHeader(
-                    "Likely next",
-                    icon = Icons.Rounded.AutoAwesome,
-                    iconColor = LocalDataColors.current.freeHue.start,
-                    info =
-                        "After ${state.predictionsAfter ?: "your last app"}, these are the apps you tend to open, from your recent app switches " +
-                            "(recent days count more).\n\nTrends → Routines shows how often these guesses are right.",
-                )
-            }
-            item(key = "next") {
-                FlowRow(
-                    modifier = Modifier.padding(horizontal = ScreenPadding),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    state.predictions.take(3).forEach { p ->
-                        AssistChip(
-                            onClick = { p.packageName?.let(nav::openApp) },
-                            label = { Text("${p.appName}  ${Format.percent(p.share)}") },
-                            leadingIcon = { AppIcon(p.packageName, p.appName, size = AssistChipDefaults.IconSize) },
-                        )
-                    }
-                }
-            }
         }
 
         if (state.todayUsageByApp.isNotEmpty()) {
@@ -842,4 +760,165 @@ internal fun pickPattern(
     }
     if (patterns.isEmpty()) return null
     return patterns[(today.toEpochDay() % patterns.size).toInt()]
+}
+
+/** Steps and how many pickups followed a notification: numbers for Trends, not Today. */
+@Composable
+internal fun TodayNumbers(state: HabitUiState) {
+    val colors = LocalDataColors.current
+    val insights = state.insights
+    TileRow {
+        MetricTile(
+            icon = Icons.Rounded.DirectionsWalk,
+            label = "Steps",
+            value = if (state.stepsToday >= 0) grouped(state.stepsToday) else "–",
+            hue = colors.stepsHue,
+            caption = if (state.stepsToday < 0) (if (state.stepPermission) "from your next steps" else "needs permission") else "today",
+            modifier = Modifier.weight(1f),
+        )
+        val pickups = insights?.pickupsToday?.takeIf { it.total > 0 }
+        MetricTile(
+            icon = Icons.Rounded.NotificationsActive,
+            label = "Notified",
+            value = pickups?.let { Format.percent(it.notificationShare) } ?: "–",
+            hue = colors.notificationsHue,
+            caption = pickups?.let { "of pickups came right after a notification" } ?: "pickups after a notification",
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+/** The next-app guesses, for Trends > Routines. */
+@Composable
+internal fun LikelyNext(
+    state: HabitUiState,
+    onOpenApp: (String) -> Unit,
+) {
+    if (state.predictions.isEmpty()) return
+    SectionHeader(
+        "Likely next",
+        icon = Icons.Rounded.AutoAwesome,
+        iconColor = LocalDataColors.current.freeHue.start,
+        info =
+            "After ${state.predictionsAfter ?: "your last app"}, these are the apps you tend to open, from your recent app switches " +
+                "(recent days count more).",
+    )
+    FlowRow(
+        modifier = Modifier.padding(horizontal = ScreenPadding),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        state.predictions.take(3).forEach { p ->
+            AssistChip(
+                onClick = { p.packageName?.let(onOpenApp) },
+                label = { Text("${p.appName}  ${Format.percent(p.share)}") },
+                leadingIcon = { AppIcon(p.packageName, p.appName, size = AssistChipDefaults.IconSize) },
+            )
+        }
+    }
+}
+
+/** The story bubbles on Today, what's been watched, and the one that's open. */
+@androidx.compose.runtime.Stable
+internal class TodayStories(
+    val bubbles: List<StoryBubble>,
+    val today: List<com.habitminer.analytics.StorySlide>,
+    val todaySeen: Boolean,
+    val open: (StoryBubble) -> Unit,
+)
+
+@Composable
+internal fun rememberTodayStories(
+    state: HabitUiState,
+    today: java.time.LocalDate,
+    lastNight: com.habitminer.analytics.SleepEstimate?,
+    zone: ZoneId,
+    nav: TodayNavigation,
+): TodayStories {
+    val insights = state.insights
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var openSlides by remember { androidx.compose.runtime.mutableStateOf<List<com.habitminer.analytics.StorySlide>?>(null) }
+    var seenTick by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    val weekStamp = today.with(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY)).toString()
+    val todaySlides = remember(insights?.patterns, today) { com.habitminer.analytics.Explainer.today(insights?.patterns.orEmpty(), today) }
+    // Seen until something new shows up today.
+    val todayStamp = today.toString() + "|" + todaySlides.joinToString(",") { it.id }
+    val lateApps = insights?.patterns?.firstOrNull { it.kind == com.habitminer.analytics.PatternKind.LATE_WEEKDAY_SLEEP }?.apps.orEmpty()
+    val nightSlides =
+        remember(lastNight, insights?.sleepWeek, lateApps) {
+            lastNight?.let { n ->
+                com.habitminer.analytics.Explainer.lastNight(
+                    n,
+                    insights?.sleepWeek?.avgNightMs?.takeIf { it > 0 },
+                    insights?.sleepWeek?.avgBedtimeMinutes ?: insights?.sleepSummary?.avgBedtimeMinutes,
+                    zone,
+                    lateApps,
+                )
+            }.orEmpty()
+        }
+    val weekSlides = remember(insights?.weekStory) { insights?.weekStory?.let { com.habitminer.analytics.Explainer.week(it) }.orEmpty() }
+    val todaySeen = remember(todayStamp, seenTick) { StorySeen.seen(context, "today", todayStamp) }
+    val bubbles =
+        remember(todaySlides, nightSlides, weekSlides, seenTick, todayStamp) {
+            buildList {
+                if (todaySlides.isNotEmpty()) {
+                    add(StoryBubble("today", "Today", StoryIcons.today, com.habitminer.analytics.StoryTone.CALM, todaySeen, todaySlides))
+                }
+                if (nightSlides.isNotEmpty()) {
+                    add(StoryBubble("night", "Last night", StoryIcons.night, com.habitminer.analytics.StoryTone.SLEEP, StorySeen.seen(context, "night", today.toString()), nightSlides))
+                }
+                if (weekSlides.isNotEmpty() || state.daysOfData >= 3) {
+                    add(StoryBubble("week", "Your week", StoryIcons.week, com.habitminer.analytics.StoryTone.SCREEN, StorySeen.seen(context, "week", weekStamp), weekSlides))
+                }
+            }
+        }
+    openSlides?.let { slides -> StoryViewer(slides, onClose = { openSlides = null }, onOpenSleep = nav::openSleep) }
+    return TodayStories(bubbles, todaySlides, todaySeen) { b ->
+        when (b.id) {
+            "today" -> StorySeen.mark(context, "today", todayStamp)
+            "night" -> StorySeen.mark(context, "night", today.toString())
+            "week" -> StorySeen.mark(context, "week", weekStamp)
+        }
+        seenTick++
+        if (b.slides.isEmpty()) nav.openStory() else openSlides = b.slides
+    }
+}
+
+/** Today's first insight as a card: bright until you've read it, then quieter. */
+@Composable
+private fun TodayInsightCard(
+    slide: com.habitminer.analytics.StorySlide,
+    more: Int,
+    read: Boolean,
+    onOpen: () -> Unit,
+) {
+    val (a, c) = storyColors(slide.tone)
+    val shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp)
+    Column(
+        modifier =
+            Modifier.padding(horizontal = 12.dp).fillMaxWidth().clip(shape)
+                .background(
+                    if (read) {
+                        androidx.compose.ui.graphics.Brush.linearGradient(listOf(MaterialTheme.colorScheme.surfaceContainerHigh, MaterialTheme.colorScheme.surfaceContainerHigh))
+                    } else {
+                        androidx.compose.ui.graphics.Brush.linearGradient(listOf(a, c))
+                    },
+                )
+                .clickable(onClickLabel = "Read today's insight", onClick = onOpen)
+                .padding(horizontal = 20.dp, vertical = 18.dp),
+    ) {
+        val on = if (read) MaterialTheme.colorScheme.onSurfaceVariant else androidx.compose.ui.graphics.Color.White
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(if (read) Icons.Rounded.CheckCircle else StoryIcons.today, contentDescription = null, tint = on, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(if (read) "Today's insight, read" else "Today's insight", style = MaterialTheme.typography.labelLarge, color = on)
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(slide.headline, style = MaterialTheme.typography.titleMedium, color = if (read) MaterialTheme.colorScheme.onSurfaceVariant else androidx.compose.ui.graphics.Color.White)
+        Spacer(Modifier.height(6.dp))
+        Text(
+            if (read) "Tap to read again" else "Tap to read why, and what to try" + if (more > 0) " (and $more more)" else "",
+            style = MaterialTheme.typography.bodyMedium,
+            color = on.copy(alpha = 0.85f),
+        )
+    }
 }

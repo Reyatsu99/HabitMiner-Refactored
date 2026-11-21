@@ -389,9 +389,9 @@ private fun AppGoalRows(
                                 val guards = com.habitminer.ui.design.LocalAppGuards.current
                                 if (pkg !in nightOnly && guards != null) {
                                     TextButton(
-                                        onClick = { guards.onGuard(com.habitminer.ui.design.GuardRequest(pkg, true, 23 * 60)) },
+                                        onClick = { guards.onGuard(com.habitminer.ui.design.GuardRequest(pkg, true, 23 * 60, weeknightsOnly = true)) },
                                         contentPadding = PaddingValues(horizontal = 0.dp),
-                                    ) { Text("Pause only after 23:00", color = LocalDataColors.current.stepsHue.text) }
+                                    ) { Text("Pause only after 23:00 on weeknights", color = LocalDataColors.current.stepsHue.text) }
                                 }
                             }
                         }

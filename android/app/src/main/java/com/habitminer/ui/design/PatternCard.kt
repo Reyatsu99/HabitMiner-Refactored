@@ -68,6 +68,7 @@ fun patternLook(p: Pattern): Triple<String, Hue, ImageVector> {
         PatternKind.MORNING_APP -> Triple("Mornings", c.stepsHue, Icons.Rounded.WbSunny)
         PatternKind.LATE_RECORD -> Triple("Last night", c.sleepHue, Icons.Rounded.Bedtime)
         PatternKind.LATE_FREE_RUN -> Triple("A good run", c.goodHue, Icons.Rounded.EmojiEvents)
+        PatternKind.NOTIFICATION_NOISE -> Triple("Notifications", c.notificationsHue, Icons.Rounded.NotificationsActive)
     }
 }
 
@@ -116,9 +117,26 @@ fun PatternCard(
             }
         }
         Spacer(Modifier.height(if (onHide != null) 2.dp else 6.dp))
-        Text(pattern.title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+        // Plain words first; the numbers behind it on request.
+        val plain = remember(pattern.key, pattern.title) { com.habitminer.analytics.Explainer.explain(pattern) }
+        var numbers by remember(pattern.key) { mutableStateOf(false) }
+        Text(plain?.headline ?: pattern.title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
         Spacer(Modifier.height(4.dp))
-        Text(pattern.detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(plain?.meaning ?: pattern.detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        plain?.tip?.let {
+            Spacer(Modifier.height(6.dp))
+            Text("Try this: $it", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
+        }
+        if (plain != null) {
+            if (numbers) {
+                Spacer(Modifier.height(6.dp))
+                Text("${pattern.title}. ${pattern.detail}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                TextButton(onClick = { numbers = true }, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 0.dp)) {
+                    Text("See the numbers", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
         when (pattern.action) {
             PatternAction.PAUSE_APP, PatternAction.PAUSE_APP_AT_NIGHT ->
                 if (pattern.packageName != null && LocalAppGuards.current != null) {
@@ -170,7 +188,7 @@ fun PatternCard(
                     } else {
                         // Late nights cost sleep before weekdays; weekends are often late on purpose.
                         fun guard(weeknights: Boolean) =
-                            pattern.apps.forEach { (pkg, _) -> guards.onGuard(GuardRequest(pkg, true, from, weeknights, pattern.title)) }
+                            guards.onGuardAll(pattern.apps.map { (pkg, _) -> GuardRequest(pkg, true, from, weeknights, pattern.title) })
                         HueTonalButton("Pause $names after ${com.habitminer.analytics.Format.clockFromMinutes(from)} on weeknights", hue, { guard(true) })
                         TextButton(onClick = { guard(false) }, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 0.dp)) {
                             Text("Every night instead", color = hue.text)

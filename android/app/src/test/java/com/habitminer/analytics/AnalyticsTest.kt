@@ -45,7 +45,7 @@ class CategoryMapperTest {
     @Test
     fun `maps common apps to friendly categories`() {
         assertEquals(AppCategory.VIDEO, CategoryMapper.categorize("com.drifty.app", "YT (drifty)", "OTHER"))
-        assertEquals(AppCategory.GAMES, CategoryMapper.categorize("com.topgames.evony", "Evony", "GAMING"))
+        assertEquals(AppCategory.GAMES, CategoryMapper.categorize("com.topgames.evony", "Game", "GAMING"))
         assertEquals(AppCategory.MESSAGING, CategoryMapper.categorize("org.telegram.messenger", "Telegram"))
         assertEquals(AppCategory.BROWSING, CategoryMapper.categorize("com.brave.browser", "Brave"))
         assertEquals(AppCategory.PRODUCTIVITY, CategoryMapper.categorize("com.anthropic.claude", "Claude"))
@@ -90,8 +90,8 @@ class SleepDetectorTest {
     fun `finds the overnight gap and uses context for confidence`() {
         val sessions =
             listOf(
-                s("Evony", d(2), 22, 0, 60),
-                s("Evony", d(2), 23, 30, 120), // until 01:30
+                s("Game", d(2), 22, 0, 60),
+                s("Game", d(2), 23, 30, 120), // until 01:30
                 s("Snapchat", wake, 9, 0, 5),
                 s("WhatsApp", wake, 10, 0, 5),
             )
@@ -101,7 +101,7 @@ class SleepDetectorTest {
         assertEquals(at(wake, 1, 30), est.sleepStart)
         assertEquals(at(wake, 9, 0), est.wakeTime)
         assertEquals(Confidence.HIGH, est.confidence)
-        assertEquals("Evony", est.lastAppBeforeSleep)
+        assertEquals("Game", est.lastAppBeforeSleep)
         assertEquals("Snapchat", est.firstAppAfterWake)
         assertEquals(60 * MIN, est.preSleepUseMs)
     }
@@ -440,9 +440,9 @@ class WeeklyStoryTest {
         assertEquals(d(8), story.from)
         assertEquals(d(14), story.to)
         assertEquals(StoryCard.Kind.WEEK, story.cards.first().kind)
-        assertEquals("1h 40m a day", story.cards.first().headline)
+        assertEquals("A lighter week: 1h 40m a day, 50m less than the week before.", story.cards.first().headline)
         val change = story.cards.first { it.kind == StoryCard.Kind.CHANGE }
-        assertTrue(change.headline.startsWith("Reels −50m"))
+        assertEquals("Reels took 50m a day less this week.", change.headline)
         assertTrue(change.body.contains("wanted to use less"))
         assertEquals(StoryCard.Kind.EXPERIMENT, story.cards.last().kind)
         assertEquals(35, story.month.size)
@@ -508,7 +508,7 @@ class PickupAnalyzerTest {
         val day = d(1)
         val unlocks = listOf(at(day, 10, 0), at(day, 11, 0), at(day, 12, 0))
         val notifs = listOf(TimedEvent(at(day, 9, 59), "pkg.whatsapp"), TimedEvent(at(day, 11, 30), "pkg.whatsapp"))
-        val sessions = listOf(s("WhatsApp", day, 10, 0, 3), s("Evony", day, 11, 0, 20))
+        val sessions = listOf(s("WhatsApp", day, 10, 0, 3), s("Game", day, 11, 0, 20))
         val stats = PickupAnalyzer.analyze(unlocks, notifs, sessions, at(day, 0), at(day, 23)) { "WhatsApp" }
 
         assertEquals(3, stats.total)
@@ -523,16 +523,16 @@ class ContextInsightsTest {
     @Test
     fun `reports dark use for an app`() {
         val day = d(1)
-        val sessions = (0 until 4).map { s("Evony", day, 20 + it, 0, 30, AppCategory.GAMES) }
+        val sessions = (0 until 4).map { s("Game", day, 20 + it, 0, 30, AppCategory.GAMES) }
         val samples = (0 until 4).map { sample(at(day, 20 + it, 15), lux = 2f, motion = 0.1f) }
         val insights = ContextInsights.compute(sessions, samples, ZONE)
-        assertTrue(insights.any { it.kind == InsightKind.DARK && it.headline.contains("Evony") })
+        assertTrue(insights.any { it.kind == InsightKind.DARK && it.headline.contains("Game") })
     }
 
     @Test
     fun `no sensor data means no light insight`() {
         val day = d(1)
-        val sessions = (0 until 4).map { s("Evony", day, 20 + it, 0, 30) }
+        val sessions = (0 until 4).map { s("Game", day, 20 + it, 0, 30) }
         val insights = ContextInsights.compute(sessions, emptyList(), ZONE)
         assertFalse(insights.any { it.kind == InsightKind.DARK })
     }
@@ -668,7 +668,7 @@ class PromptPolicyTest {
 
     @Test
     fun `late-night leisure stretch triggers a nudge`() {
-        val sessions = listOf(s("Evony", day, 23, 0, 15, AppCategory.GAMES), s("Evony", day, 23, 16, 15, AppCategory.GAMES))
+        val sessions = listOf(s("Game", day, 23, 0, 15, AppCategory.GAMES), s("Game", day, 23, 16, 15, AppCategory.GAMES))
         val nudge = PromptPolicy.nudgeFor(true, sessions, sample(at(day, 23, 20), lux = 1f), emptyList(), at(day, 23, 31), ZONE)
         assertNotNull(nudge)
         assertEquals("late_night", nudge!!.key)
@@ -1808,6 +1808,50 @@ class PatternsTest {
         assertEquals(card.body, 1, Regex("too recently").findAll(card.body).count())
         assertTrue(card.body, card.body.startsWith("8 apps: added too recently"))
         assertTrue(card.body, card.body.contains("14 Oct"))
+    }
+
+    @Test
+    fun notificationNoiseIgnoresSystemAndAppWithdrawn() {
+        val sessions = (1..10).map { s("YT", d(it), 20, 0, 30, AppCategory.VIDEO) }
+        val removals = mutableListOf<NotificationRemoval>()
+        for (k in 0 until 40) removals += NotificationRemoval(at(d(1 + k % 10), 9, k), "com.pay", if (k % 2 == 0) "dismissed" else "dismissed_all")
+        // Withdrawn by the app: not counted. System UI: never flagged.
+        for (k in 0 until 40) removals += NotificationRemoval(at(d(1 + k % 10), 10, k), "com.news", "app")
+        for (k in 0 until 40) removals += NotificationRemoval(at(d(1 + k % 10), 11, k), "com.android.systemui", "dismissed")
+        // Opened often: not noise.
+        for (k in 0 until 40) removals += NotificationRemoval(at(d(1 + k % 10), 12, k), "com.chat", if (k % 3 == 0) "opened" else "dismissed")
+        val ps = PatternFinder.find(sessions, emptyList(), emptyList(), emptyList(), d(11), at(d(11), 10, 0), ZONE, removals) { if (it == "com.pay") "Pay" else it }
+        val noise = ps.filter { it.kind == PatternKind.NOTIFICATION_NOISE }
+        assertEquals(listOf("com.pay"), noise.map { it.packageName })
+        assertEquals("You cleared 40 notifications from Pay in four weeks and opened none", noise.first().title)
+        assertNotNull(Explainer.explain(noise.first()))
+    }
+
+    @Test
+    fun todayStoryIsShortAndKeysAreStable() {
+        val sessions = (1..14).map { day -> s("YT", d(day), 20, 0, if (day <= 7) 180 else 60, AppCategory.VIDEO) } +
+            (1..14).flatMap { day -> (0 until 3).map { k -> s("YT", d(day), 0, 10 + k * 16, 15, AppCategory.VIDEO) } }
+        val ps = PatternFinder.find(sessions, emptyList(), emptyList(), emptyList(), d(15), at(d(15), 10, 0), ZONE)
+        assertTrue(ps.none { it.key.contains(d(15).toString()) })
+        val slides = Explainer.today(ps, d(15))
+        assertTrue(slides.size in 1..2)
+    }
+
+    @Test
+    fun sleepIgnoresTheAlarmClockAsFirstOrLastApp() {
+        val day = d(3)
+        val sessions =
+            listOf(
+                s("YT", d(2), 23, 0, 40, AppCategory.VIDEO),
+                UsageSession("com.android.deskclock", "Clock", AppCategory.TOOLS, at(d(2), 23, 41), at(d(2), 23, 42), MIN),
+                UsageSession("com.android.deskclock", "Clock", AppCategory.TOOLS, at(day, 7, 30), at(day, 7, 31), MIN),
+                s("Chat", day, 7, 33, 5, AppCategory.MESSAGING),
+            )
+        val est = SleepDetector.detect(sessions, emptyList(), emptyList(), day, at(day, 12, 0), ZONE)
+        assertNotNull(est)
+        assertEquals("YT", est!!.lastAppBeforeSleep)
+        assertEquals("Chat", est.firstAppAfterWake)
+        assertTrue(est.lastAppLeisure)
     }
 }
 
