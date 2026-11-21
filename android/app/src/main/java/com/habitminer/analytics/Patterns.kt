@@ -156,7 +156,7 @@ data class GoalImpact(
         return if (nightOnly) {
             "You open it anyway at most pauses, even at night. A pause may not be the right tool for this app; a daily reminder in Remind me might suit it better."
         } else {
-            "You open it anyway at most pauses. Try pausing it only at night, when long sessions do the most harm: add it again from its card in Your patterns or its app page."
+            "You open it anyway at most pauses. A pause only at night, when long sessions cost the most, may suit it better."
         }
     }
 }
@@ -665,13 +665,20 @@ object PatternFinder {
     // ---- Still to come, for new users ---------------------------------------------------
 
     /** Patterns that need more days than you have yet, and roughly when they can show. */
-    fun upcoming(daysOfData: Int): List<String> {
+    fun upcoming(
+        daysOfData: Int,
+        showing: Set<PatternKind> = emptySet(),
+    ): List<String> {
         fun more(n: Int) = (n - daysOfData).let { if (it == 1) "1 more day" else "$it more days" }
         val out = mutableListOf<String>()
         if (daysOfData < 4) out += "Checking all day: in ${more(4)}"
         if (daysOfData < 7) out += "Long sessions, notifications that pull you in, and your mornings: in ${more(7)}"
-        if (daysOfData < 14) out += "This week against the week before: in ${more(14)}"
-        if (daysOfData < 21) out += "Late weekday nights and sleep: once there are 10 weekday nights, about ${if (daysOfData < 7) "3" else "2"} weeks in"
+        if (daysOfData < 14 && PatternKind.WEEK_CHANGE !in showing && PatternKind.APP_WEEK_CHANGE !in showing) {
+            out += "This week against the week before: in ${more(14)}"
+        }
+        if (daysOfData < 21 && PatternKind.LATE_WEEKDAY_SLEEP !in showing) {
+            out += "Late weekday nights and sleep: once there are 10 weekday nights, about ${if (daysOfData < 7) "3" else "2"} weeks in"
+        }
         return out
     }
 

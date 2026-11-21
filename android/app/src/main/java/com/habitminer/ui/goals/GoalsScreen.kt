@@ -350,12 +350,16 @@ private fun AppGoalRows(
                             )
                         }
                         im.suggestion(pkg in nightOnly)?.let { tip ->
-                            Text(
-                                tip,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = LocalDataColors.current.stepsHue.text,
-                                modifier = Modifier.padding(start = 90.dp, end = 16.dp, bottom = 14.dp),
-                            )
+                            Column(modifier = Modifier.padding(start = 90.dp, end = 16.dp, bottom = 10.dp)) {
+                                Text(tip, style = MaterialTheme.typography.bodySmall, color = LocalDataColors.current.stepsHue.text)
+                                val guards = com.habitminer.ui.design.LocalAppGuards.current
+                                if (pkg !in nightOnly && guards != null) {
+                                    TextButton(
+                                        onClick = { guards.onGuard(pkg, true, 23 * 60) },
+                                        contentPadding = PaddingValues(horizontal = 0.dp),
+                                    ) { Text("Pause only after 23:00", color = LocalDataColors.current.stepsHue.text) }
+                                }
+                            }
                         }
                     }
                 }

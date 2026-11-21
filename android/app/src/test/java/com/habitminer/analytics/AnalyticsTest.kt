@@ -1758,6 +1758,7 @@ class PatternsTest {
         assertEquals(4, PatternFinder.upcoming(2).size)
         assertTrue(PatternFinder.upcoming(2).first().endsWith("in 2 more days"))
         assertEquals(1, PatternFinder.upcoming(15).size)
+        assertTrue(PatternFinder.upcoming(15, setOf(PatternKind.LATE_WEEKDAY_SLEEP)).isEmpty())
         assertTrue(PatternFinder.upcoming(30).isEmpty())
     }
 }

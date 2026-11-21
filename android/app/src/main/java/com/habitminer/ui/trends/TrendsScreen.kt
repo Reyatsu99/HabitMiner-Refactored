@@ -168,7 +168,7 @@ private fun LazyListScope.overview(
                     "\"This week\" ones compare the last 7 days with the 7 before and change as you go.",
         )
     }
-    val upcoming = com.habitminer.analytics.PatternFinder.upcoming(state.daysOfData)
+    val upcoming = com.habitminer.analytics.PatternFinder.upcoming(state.daysOfData, insights.patterns.map { it.kind }.toSet())
     if (insights.patterns.isEmpty() && upcoming.isEmpty()) {
         item(key = "patterns-empty") {
             Note("Nothing stands out clearly right now. Patterns show only when they clearly hold in your own data.")
