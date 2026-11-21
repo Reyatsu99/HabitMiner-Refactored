@@ -5,9 +5,9 @@
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.3-purple.svg)](https://kotlinlang.org/)
 [![Android](https://img.shields.io/badge/Android-8.0%2B-green.svg)](https://developer.android.com/)
-[![Version](https://img.shields.io/badge/Version-2.1-blue.svg)](#-whats-new-in-extended)
+[![Version](https://img.shields.io/badge/Version-2.2-blue.svg)](#-whats-new-in-extended)
 
-HabitMiner Extended is the next version of [HabitMiner](README_OLD.md). It installs as its own app (**HM Extended**, `com.habitminer.extended`) next to the original, can bring the original's history across, and adds a redesigned interface, better sleep and nap tracking, goals, a long list of accuracy fixes found by using it every day, and (in 2.1) shorter daily loops: act on an insight in one tap, a mindful pause that tells you something, and a Today screen that ends.
+HabitMiner Extended is the next version of [HabitMiner](README_OLD.md). It installs as its own app (**HM Extended**, `com.habitminer.extended`) next to the original, can bring the original's history across, and adds a redesigned interface, better sleep and nap tracking, goals, a long list of accuracy fixes found by using it every day, shorter daily loops (2.1), and (in 2.2) **patterns**: what pulls you into your phone, what it costs you, and whether your changes are working.
 
 Everything stays on the phone. There is no account and no server; data leaves the device only when you export it.
 
@@ -18,6 +18,28 @@ Everything stays on the phone. There is no account and no server; data leaves th
 <p align="center">
   <img src="docs/screenshots/extended/overview.png" alt="HabitMiner Extended: Today, Sleep, Trends, Goals and Status" width="100%">
 </p>
+
+### New in 2.2: your patterns
+
+<table>
+  <tr>
+    <td align="center" valign="top" width="33%">
+      <img src="docs/screenshots/extended/trends_overview.png" alt="Your patterns" width="250"><br>
+      <b>Your patterns</b><br>
+      <sub>Where the time really goes, late nights and sleep, this week against last, notifications that pull you in, the app that leads into another. Each shows only when it holds for you.</sub>
+    </td>
+    <td align="center" valign="top" width="33%">
+      <img src="docs/screenshots/extended/app_hooks.png" alt="How it hooks you" width="250"><br>
+      <b>How it hooks you</b><br>
+      <sub>On every app's page: quick checks against long sessions and when those happen, what you were in right before, and where you go next.</sub>
+    </td>
+    <td align="center" valign="top" width="33%">
+      <img src="docs/screenshots/extended/goals_impact.png" alt="Is it working" width="250"><br>
+      <b>Is it working?</b><br>
+      <sub>For each Use less app: how often you closed it at the pause, and its daily time against your usual four weeks before. "Too early" until there are 5 days.</sub>
+    </td>
+  </tr>
+</table>
 
 ### New in 2.1
 
@@ -36,7 +58,7 @@ Everything stays on the phone. There is no account and no server; data leaves th
     <td align="center" valign="top" width="33%">
       <img src="docs/screenshots/extended/today_caught_up.png" alt="All caught up" width="250"><br>
       <b>All caught up</b><br>
-      <sub>When nothing needs an answer, one quiet line and the next check-in. Today now ends at about a screen and a half.</sub>
+      <sub>When nothing needs an answer, one quiet line, the next check-in, and one of your patterns. Today now ends at about a screen and a half.</sub>
     </td>
   </tr>
   <tr>
@@ -172,10 +194,11 @@ Everything stays on the phone. There is no account and no server; data leaves th
 - **Usual days**: every day is compared with up to four weeks of days of the same kind (weekday or weekend), using medians so a few odd days don't skew "usual". Today is compared at the same time of day.
 - **Changes** in both directions (total time, late nights, apps missing or spiking, unlocks, sleep) and routine changes over several days, which you can label (exams, travel, unwell, holiday) to keep them out of "usual".
 - **Next-app model** that learns from what usually follows the current app, the hour, recent apps, notifications, headphones and charging, with its hit rate measured against simple baselines.
+- **Your patterns**: long sessions, late nights and sleep, week-on-week changes, notifications that pull you in, and apps that lead into others, each shown only when it holds ([how they were checked](docs/FINDINGS.md)).
 - **Insight of the day**, **Weekly Story**, and context insights such as screen time in the dark or after midnight.
 
 **Acting on it**
-- **Goals**: a daily intention, a phone-time target, apps to use less or more with "N of the last 7 days" dots, and reminders when you're over.
+- **Goals**: a daily intention, a phone-time target, apps to use less or more with "N of the last 7 days" dots, whether each one is working, and reminders when you're over.
 - **One-tap pause** from insights, routines and app pages; **gentle nudges**, an optional **mindful pause** that shows how often you've opened the app, and **focus sessions** (both off by default), a home-screen **widget**, a **Quick Settings tile** and app **shortcuts**.
 - **Quick check-ins** and **Expected / Unusual** answers are saved as ground-truth labels, with the context at the time.
 
@@ -187,6 +210,20 @@ Everything stays on the phone. There is no account and no server; data leaves th
 ---
 
 ## 🆕 What's new in Extended
+
+### 2.2: from reporting to findings
+Screen time, pickups and per-app time are what Android's Digital Wellbeing already shows. 2.2 adds what it can't: patterns that connect time of day, app order, notifications and sleep, found in your own data.
+- **Your patterns** (Trends → Overview, and one on Today once you're caught up):
+  - **Where the time goes**: when a few long sessions (15+ min) make up most of an app's time, and when they happen.
+  - **Late weekday nights and sleep**: how much less you sleep on weekday nights you go to bed late (weekends are left out, because sleeping in hides the effect).
+  - **This week vs the week before**, in total and for the apps that changed most.
+  - **Notifications that pull you in**: only for apps where a notification leads to a long session at least twice as often as usual.
+  - **How you get there**: a social, video or game app you mostly open right after another app.
+  - **Checking all day**, **last night's longest late session**, and **a run of quiet nights**; plus "busiest hours" and "first app of the morning", shown only when they're clear.
+- **Act on it in place**: a pause on that app (only after a set time at night when the long sessions are late), the app's notification settings, or your nights on Sleep.
+- **How it hooks you** on each app's page: quick checks vs long sessions, what comes right before, first app after unlocking, and where you go next.
+- **Is it working?** on Goals for each Use less app: pauses closed vs opened anyway, and daily time against the four weeks before, leaving out the unusual day that usually prompts a goal.
+- Every pattern was checked on two real exports before it was built; what held up, what was dropped and why is in [docs/FINDINGS.md](docs/FINDINGS.md).
 
 ### 2.1: shorter daily loops
 - **Insight → action**: insights and differences about using one app more, each routine in Trends → Routines, and every app's detail page offer **Pause before opening** or **Use less** in one tap. Apps already on your list show "Pause on before Instagram" with an Edit link instead of the same buttons again, and if Android's Accessibility switch for the pause is off, the button takes you there.
