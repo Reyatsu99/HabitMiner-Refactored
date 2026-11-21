@@ -18,6 +18,18 @@ open class AppIdentityResolver
         private val appNameCache = ConcurrentHashMap<String, String>()
         private val launcherCache = ConcurrentHashMap<String, Boolean>()
 
+        /** Whether the app is still on the phone (uninstalled apps stay in your history). */
+        open fun isInstalled(packageName: String): Boolean =
+            try {
+                packageManager.getApplicationInfo(packageName, 0)
+                true
+            } catch (e: PackageManager.NameNotFoundException) {
+                false
+            } catch (e: SecurityException) {
+                // Can't tell: don't hide it.
+                true
+            }
+
         open fun getAppName(packageName: String): String {
             if (packageName.isBlank()) return ""
             return appNameCache.getOrPut(packageName) {

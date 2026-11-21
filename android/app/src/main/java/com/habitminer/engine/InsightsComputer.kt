@@ -259,6 +259,16 @@ class InsightsComputer
                     val hidden = patternPrefs.hidden.value
                     com.habitminer.analytics.PatternFinder.find(roled, notificationEvents, unlocks, routine.nights, today, now, zone)
                         .filterNot { it.key in hidden }
+                        // Nothing to act on for an app that's no longer installed.
+                        .filter { p -> p.packageName?.let(appIdentityResolver::isInstalled) ?: true }
+                        .map { p -> if (p.apps.isEmpty()) p else p.copy(apps = p.apps.filter { appIdentityResolver.isInstalled(it.first) }) }
+                        .map { p ->
+                            if (p.action == com.habitminer.analytics.PatternAction.PAUSE_APPS_AT_NIGHT && p.apps.isEmpty()) {
+                                p.copy(action = com.habitminer.analytics.PatternAction.OPEN_SLEEP, nightFromMinute = null)
+                            } else {
+                                p
+                            }
+                        }
                 }.getOrDefault(emptyList())
             // Use less apps: pauses answered and time against before.
             val goals = goalsStore.goals.value

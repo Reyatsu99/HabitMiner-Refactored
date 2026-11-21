@@ -1129,7 +1129,10 @@ class HabitViewModel
                                 daily = com.habitminer.analytics.UsageSummaries.daily(sessions, 14, today, zone)
                                 apps = com.habitminer.analytics.UsageSummaries.apps(sessions, today, zone)
                                 com.habitminer.analytics.NextAppModel.currentApp(sessions) to
-                                    com.habitminer.analytics.NextAppModel.predict(sessions, nowMs, zone, notifications = notes, situations = situations)
+                                    // Apps you've since uninstalled can't be next: ask for a few more and drop them.
+                                    com.habitminer.analytics.NextAppModel.predict(sessions, nowMs, zone, count = 8, notifications = notes, situations = situations)
+                                        .filter { g -> g.packageName?.let(appIdentityResolver::isInstalled) ?: true }
+                                        .take(3)
                             }
                         val days =
                             withContext(Dispatchers.IO) {
