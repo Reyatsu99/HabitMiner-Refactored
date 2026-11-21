@@ -5,7 +5,7 @@ import numpy as np
 from scipy.special import rel_entr
 import json
 import math
-from baseline_model import PersonalBaseline, BaselineBin
+from baseline_model import PersonalBaseline
 
 @dataclass
 class DeviationEvent:
