@@ -96,12 +96,10 @@ object ContextualBehaviorAnalyzer {
         val days = mutableSetOf<LocalDate>()
     }
 
-    @Suppress("UNUSED_PARAMETER")
     fun compute(
         sessions: List<UsageSession>,
         samples: List<ContextSample>,
         zone: ZoneId,
-        situations: List<ContextSpan> = emptyList(),
     ): List<ContextRelationship> {
         if (sessions.isEmpty() || samples.size < 2) return emptyList()
         val orderedSamples = samples.distinctBy { it.timestamp }.sortedBy { it.timestamp }
@@ -133,8 +131,12 @@ object ContextualBehaviorAnalyzer {
             val sessionId = indexed.index
             val session = indexed.value
             val wallSpan = session.end - session.start
-            val actualDuration = session.durationMs.coerceAtLeast(0L).coerceAtMost(wallSpan)
-            if (wallSpan <= 0L || actualDuration <= 0L) return@forEach
+            // UsageDataCollector merges same-app visits separated by short gaps. Those rows
+            // retain summed foreground duration but no longer retain the individual active
+            // intervals. Spreading that duration across the full wall span would assign use
+            // to sensor states during gaps when the app was not actually foregrounded.
+            // Exclude such rows rather than inventing a temporal distribution.
+            if (wallSpan <= 0L || session.durationMs != wallSpan) return@forEach
 
             // Binary-search the first observation whose end is after this session starts.
             var low = 0
@@ -150,8 +152,8 @@ object ContextualBehaviorAnalyzer {
                 val overlapMs = (minOf(session.end, observation.end) -
                     maxOf(session.start, observation.start)).coerceAtLeast(0L)
                 if (overlapMs > 0L) {
-                    val useMs = if (overlapMs == wallSpan) actualDuration
-                    else actualDuration * overlapMs / wallSpan
+                    // Only exact foreground intervals reach this point, so overlap is actual use.
+                    val useMs = overlapMs
                     if (useMs > 0L) {
                         observation.states.forEach { state ->
                             val key = UseKey(session.appName, state.dimension, state.phrase, observation.stratum)
