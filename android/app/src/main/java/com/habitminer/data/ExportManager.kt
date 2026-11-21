@@ -49,6 +49,13 @@ class ExportManager
             return h.take(8).fold(0L) { acc, b -> (acc shl 8) or (b.toLong() and 0xff) } and Long.MAX_VALUE
         }
 
+        /** Re-keys a stored Wi-Fi place token in privacy-safe exports without breaking its joins. */
+        private fun exportedPlaceId(value: String?, private: Boolean): String {
+            if (value.isNullOrEmpty() || !private) return value.orEmpty()
+            val hash = java.security.MessageDigest.getInstance("SHA-256").digest((salt() + "place" + value).toByteArray())
+            return "place_" + hash.take(6).joinToString("") { "%02x".format(it) }
+        }
+
         suspend fun exportDataToCsv(): String? {
             try {
                 val priv = prefs.getBoolean(PrefsKeys.EXPORT_PRIVATE, false)
@@ -91,7 +98,7 @@ class ExportManager
                         writer.append("${it.accelMax},${it.accelEnergy},${it.gyroMean},${it.gyroVariance},${it.gyroStd},${it.gyroMin},")
                         writer.append("${it.gyroMax},${it.gyroEnergy},${it.lightLux},${it.proximityNear ?: ""},")
                         writer.append("${it.stepsSinceLastSnapshot},${it.batteryLevel},${it.isCharging},${it.isScreenOn},")
-                        writer.append("${it.unlockCount},${it.notificationsLastHour},${it.wifiPlace ?: ""},${it.sensingMs},${it.recentSteps},${it.batteryTempC ?: ""},${it.powerSave ?: ""},${it.thermalStatus ?: ""}\n")
+                        writer.append("${it.unlockCount},${it.notificationsLastHour},${escapeCsv(exportedPlaceId(it.wifiPlace, priv))},${it.sensingMs},${it.recentSteps},${it.batteryTempC ?: ""},${it.powerSave ?: ""},${it.thermalStatus ?: ""}\n")
                     }
                 }
 
@@ -156,7 +163,7 @@ class ExportManager
                 FileWriter(placesFile).use { writer ->
                     writer.append("placeHash,label,firstSeen,lastSeen\n")
                     places.forEach {
-                        writer.append("${it.placeHash},${escapeCsv(if (priv) "" else it.label ?: "")},${it.firstSeen},${it.lastSeen}\n")
+                        writer.append("${escapeCsv(exportedPlaceId(it.placeHash, priv))},${escapeCsv(if (priv) "" else it.label ?: "")},${it.firstSeen},${it.lastSeen}\n")
                     }
                 }
 
@@ -280,7 +287,7 @@ class ExportManager
                 if (priv) {
                     appendLine()
                     appendLine("Privacy-safe export: package names are replaced by app_<hash> (salted, stable on this phone), and app names,")
-                    appendLine("session IDs are re-keyed, and place names, routine descriptions, insight text and keys, and typed check-in notes are left out.")
+                    appendLine("session IDs are re-keyed, place IDs are re-keyed consistently across files, and place names, routine descriptions, insight text and keys, and typed check-in notes are left out.")
                     appendLine("App categories are kept.")
                 }
             }
