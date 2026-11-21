@@ -106,12 +106,16 @@ internal object SequentialPatternMiner {
                 if (supportDays < minSupport) continue
 
                 val pattern = prefix + token
-                discovered += MinedSequencePattern(
-                    packageSequence = pattern,
-                    appSequence = pattern.map { names[it] ?: it },
-                    occurrences = supportDays,
-                    lastSeenAt = nextProjections.maxOf { it.lastEnd },
-                )
+                // The empty-prefix pass seeds the search with single app tokens. Those tokens
+                // are not habits; only emit a pattern once it contains an actual transition.
+                if (prefix.isNotEmpty()) {
+                    discovered += MinedSequencePattern(
+                        packageSequence = pattern,
+                        appSequence = pattern.map { names[it] ?: it },
+                        occurrences = supportDays,
+                        lastSeenAt = nextProjections.maxOf { it.lastEnd },
+                    )
+                }
                 grow(pattern, nextProjections)
             }
         }
