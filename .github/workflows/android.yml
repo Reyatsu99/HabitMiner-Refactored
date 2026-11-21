@@ -21,13 +21,15 @@ jobs:
     name: Build APK and run unit tests
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
     timeout-minutes: 40
     defaults:
       run:
         working-directory: android
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-java@v5
         with:
@@ -42,7 +44,7 @@ jobs:
         run: |
           chmod +x gradlew
           set -o pipefail
-          ./gradlew --no-daemon --stacktrace assembleDebug assembleRelease testDebugUnitTest 2>&1 | tee build.log
+          ./gradlew --no-daemon --stacktrace assembleDebug assembleRelease testDebugUnitTest spotlessCheck 2>&1 | tee build.log
 
       # Turn compiler and test failures into annotations so they show up on the
       # commit's check run without needing to open the raw logs.
@@ -122,31 +124,28 @@ jobs:
               print(f"::notice title=Room schema {path.split('/')[-1]}::{msg}")
           EOF
 
-      # Publish the screenshots and the debug APK to a separate branch so they can be
-      # reviewed and downloaded without opening the Actions artifacts.
-      # Pull requests from forks get a read-only token, so publishing is skipped there
-      # (the build and tests still run). A publishing hiccup never fails the build.
-      - name: Publish screenshots and APK
-        if: always() && github.event_name != 'pull_request' && hashFiles('android/app/build/screenshots/*.png') != ''
-        continue-on-error: true
-        working-directory: .
+      # Stage optional screenshots and APKs as an artifact for a separate, write-enabled job.
+      - name: Package CI outputs
+        if: success()
         run: |
-          set -e
-          mkdir -p /tmp/out
-          cp android/app/build/screenshots/*.png /tmp/out/
-          cp android/app/build/outputs/apk/debug/*.apk /tmp/out/habitminer-debug.apk 2>/dev/null || true
-          cp android/app/build/outputs/apk/release/*.apk /tmp/out/HabitMinerExtended.apk 2>/dev/null || true
-          git config user.name "habitminer-ci"
-          git config user.email "habitminer-ci@users.noreply.github.com"
-          git checkout -q --orphan ci-outputs-tmp
-          git rm -rq --cached . > /dev/null
-          cp /tmp/out/* .
-          echo "Build outputs for ${GITHUB_SHA} (${GITHUB_REF_NAME})" > OUTPUTS.md
-          git add -f ./*.png ./*.apk OUTPUTS.md 2>/dev/null || git add -f ./*.png OUTPUTS.md
-          git commit -q -m "Outputs for ${GITHUB_SHA}"
-          # One outputs branch per source branch, so builds of different branches don't
-          # overwrite each other's APK.
-          git push -q -f origin "HEAD:refs/heads/ci-out-${GITHUB_REF_NAME//\//-}"
+          mkdir -p ci-output
+          find app/build/screenshots -type f -name '*.png' -exec cp {} ci-output/ \; 2>/dev/null || true
+          if compgen -G 'app/build/outputs/apk/debug/*.apk' > /dev/null; then
+            cp app/build/outputs/apk/debug/*.apk ci-output/habitminer-debug.apk
+          fi
+          if compgen -G 'app/build/outputs/apk/release/*.apk' > /dev/null; then
+            cp app/build/outputs/apk/release/*.apk ci-output/HabitMinerExtended.apk
+          fi
+          test -f ci-output/HabitMinerExtended.apk
+          tar -czf ci-output.tar.gz -C ci-output .
+
+      - name: Upload CI outputs for publisher
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-output-files
+          path: android/ci-output.tar.gz
+          retention-days: 1
 
       - name: Upload APKs
         if: success()
@@ -157,3 +156,35 @@ jobs:
             android/app/build/outputs/apk/release/*.apk
             android/app/build/outputs/apk/debug/*.apk
           retention-days: 14
+  publish:
+    name: Publish main-branch outputs
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download CI outputs
+        uses: actions/download-artifact@v4
+        with:
+          name: ci-output-files
+          path: /tmp/ci-output-artifact
+
+      - name: Publish screenshots and APK
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/out
+          tar -xzf /tmp/ci-output-artifact/ci-output.tar.gz -C /tmp/out
+          test -f /tmp/out/HabitMinerExtended.apk
+          git config user.name "habitminer-ci"
+          git config user.email "habitminer-ci@users.noreply.github.com"
+          git checkout --orphan ci-outputs-tmp
+          git rm -rq --cached . > /dev/null 2>&1 || true
+          git clean -fdx
+          cp /tmp/out/* .
+          echo "Build outputs for ${GITHUB_SHA} (main)" > OUTPUTS.md
+          git add -f ./*.png ./*.apk OUTPUTS.md 2>/dev/null || git add -f ./*.png OUTPUTS.md
+          git commit -m "Outputs for ${GITHUB_SHA}"
+          git push --force origin HEAD:refs/heads/ci-out-main
