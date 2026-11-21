@@ -11,12 +11,12 @@ At the time of this guide, `main` and `harsh-habitminer-extended` are synchroniz
 | Branch | Purpose | Handling |
 |---|---|---|
 | `main` | Canonical application source | Default branch; keep tested and current |
-| `harsh-habitminer-extended` | Extended integration branch | Currently synchronized with `main`; use only if a separate integration branch is needed |
-| `feat/context-aware-habit-mining` | Sequential pattern-mining feature branch | Integrated through PR #5; retained as historical feature work |
-| `HM-Extended` | Earlier Extended snapshot | Historical branch; not a release source |
-| `HM-Extended-copy` | Duplicate of the earlier Extended snapshot | Same commit as `HM-Extended`; do not develop on both |
+| `harsh-habitminer-extended` | Extended integration alias | Synchronized with `main`; do not develop independently |
+| `feat/context-aware-habit-mining` | Merged sequential pattern-mining branch | PR #5 is merged; branch synchronized with `main` |
+| `HM-Extended` | Legacy branch name | Synchronized with `main` for compatibility |
+| `HM-Extended-copy` | Duplicate legacy branch name | Synchronized with `main`; duplicate alias retained for compatibility |
 
-The two `HM-Extended*` branches are intentionally retained as historical references. They should not be merged into `main` again without reviewing their ancestry and tree differences.
+All five source branches currently point to the same commit. `main` is the only canonical development and release branch; the other names are compatibility aliases. Do not create separate development histories on these aliases. The feature work was integrated through PR #5 before the aliases were fast-forwarded.
 
 ## Generated-output branches
 
