@@ -83,7 +83,7 @@ fun InsightPanel(
         Text("Why this: ${insight.why}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         guardApp?.let { (pkg, name) ->
             Spacer(Modifier.height(10.dp))
-            com.habitminer.ui.design.GuardActions(pkg, name)
+            com.habitminer.ui.design.GuardActions(pkg, name, reason = insight.title)
         }
         Spacer(Modifier.height(12.dp))
         when {

@@ -72,6 +72,8 @@ class PauseActivity : ComponentActivity() {
 
     @Inject lateinit var contextRepository: ContextRepository
 
+    @Inject lateinit var goalsStore: com.habitminer.goals.GoalsStore
+
     private var decided = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -104,6 +106,7 @@ class PauseActivity : ComponentActivity() {
                         seconds = seconds,
                         reduced = reduced,
                         context = context,
+                        reason = goalsStore.goals.value.reasons[pkg],
                         focusUntil = focusUntil,
                         onOpen = { open(pkg) },
                         onLeave = { leave(pkg, focusUntil != null) },
@@ -169,6 +172,8 @@ internal fun PauseScreen(
     reduced: Boolean,
     context: PauseContext?,
     focusUntil: Long?,
+    /** Why you set this pause up (usually the pattern it came from). */
+    reason: String? = null,
     onOpen: () -> Unit,
     onLeave: () -> Unit,
     onEndFocus: () -> Unit,
@@ -215,6 +220,15 @@ internal fun PauseScreen(
             textAlign = TextAlign.Center,
             minLines = 2,
         )
+        if (focusUntil == null && reason != null) {
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "You set this up because: $reason",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary,
+                textAlign = TextAlign.Center,
+            )
+        }
         Spacer(Modifier.height(36.dp))
         Box(Modifier.size(180.dp), contentAlignment = Alignment.Center) {
             Canvas(Modifier.fillMaxSize()) {

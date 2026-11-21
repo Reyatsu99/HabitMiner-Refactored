@@ -227,12 +227,22 @@ class MainActivity : ComponentActivity() {
                 pauseEnabled = pauseEnabled,
                 serviceOn = serviceOn,
                 pauseFrom = goals.pauseFrom,
-                onGuard = { pkg, pause, nightFrom ->
+                weeknightsOnly = goals.weeknightsOnly,
+                onGuard = { r ->
+                    val pkg = r.packageName
+                    val pause = r.pause
                     goalsStore.update { g ->
                         g.copy(
                             useLess = (g.useLess - pkg) + pkg,
                             useMore = g.useMore - pkg,
-                            pauseFrom = if (nightFrom != null) g.pauseFrom + (pkg to nightFrom) else if (pause) g.pauseFrom - pkg else g.pauseFrom,
+                            pauseFrom = if (r.nightFrom != null) g.pauseFrom + (pkg to r.nightFrom) else if (pause) g.pauseFrom - pkg else g.pauseFrom,
+                            weeknightsOnly =
+                                when {
+                                    r.nightFrom != null -> if (r.weeknightsOnly) g.weeknightsOnly + pkg else g.weeknightsOnly - pkg
+                                    pause -> g.weeknightsOnly - pkg
+                                    else -> g.weeknightsOnly
+                                },
+                            reasons = r.reason?.let { g.reasons + (pkg to it) } ?: g.reasons,
                         )
                     }
                     if (pause) {

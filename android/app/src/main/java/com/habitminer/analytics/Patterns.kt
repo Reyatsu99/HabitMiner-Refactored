@@ -230,7 +230,7 @@ object PatternFinder {
         runCatching { out += notificationPull(visits, notifications.filter { it.time >= from }) }
         runCatching { out += leadIns(visits) }
         runCatching { busyHours(recent, today, zone)?.let { out += it } }
-        runCatching { checkingPeak(visits, days, zone)?.let { out += it } }
+        runCatching { checkingPeak(visits, days, notifications.filter { it.time >= from }, zone)?.let { out += it } }
         runCatching { morningApp(visits, nights)?.let { out += it } }
         runCatching { out += lateNights(visits, today, now, zone) }
         return out.sortedByDescending { it.strength }
@@ -249,6 +249,8 @@ object PatternFinder {
         return byApp.entries.sortedByDescending { e -> e.value.sumOf { it.ms } }.take(5).mapNotNull { (pkg, vs) ->
             val total = vs.sumOf { it.ms }
             if (total / days < 20 * TimeUtil.MINUTE) return@mapNotNull null
+            // Long sessions in work and study apps, maps or music are usually the point.
+            if (vs.first().category in NOT_PAUSED_AT_NIGHT) return@mapNotNull null
             val long = vs.filter { it.ms >= LONG_MS }
             val longShare = long.sumOf { it.ms }.toFloat() / total
             val longPerDay = long.size.toFloat() / days
@@ -546,6 +548,7 @@ object PatternFinder {
     private fun checkingPeak(
         visits: List<Visit>,
         days: Int,
+        notifications: List<NotificationEvent>,
         zone: ZoneId,
     ): Pattern? {
         if (days < 4) return null
@@ -559,7 +562,32 @@ object PatternFinder {
         val busiest = (0 until 24).sortedByDescending { perHour[it] }.take(12)
         val mean = busiest.map { perHour[it] }.average()
         if (mean < 10) return null
-        val top = quick.groupingBy { it.appName }.eachCount().entries.sortedByDescending { it.value }.take(3).map { it.key }
+        val topApps = quick.groupBy { it.packageName }.entries.sortedByDescending { it.value.size }.take(3)
+        val top = topApps.map { it.value.first().appName }
+        // Which of them you check because they notified you, and which you open yourself:
+        // only the first kind is helped by quieter notifications.
+        val notes = notifications.sortedBy { it.time }
+        val times = notes.map { it.time }.toLongArray()
+        val nudged =
+            topApps.associate { (pkg, vs) ->
+                val hit =
+                    vs.count { v ->
+                        var j = upperBound(times, v.start) - 1
+                        var found = false
+                        while (j >= 0 && v.start - times[j] <= SAME_VISIT_MS) {
+                            if (notes[j].packageName == pkg) {
+                                found = true
+                                break
+                            }
+                            j--
+                        }
+                        found
+                    }
+                pkg to hit.toFloat() / vs.size
+            }
+        val byNotes = topApps.filter { (nudged[it.key] ?: 0f) >= 0.3f }
+        val bySelf = topApps.filter { (nudged[it.key] ?: 0f) < 0.15f }.map { it.value.first().appName }
+        val action = byNotes.firstOrNull()
         val from = busiest.min()
         val to = busiest.max() + 1
         val wraps = busiest.any { it < 5 } && busiest.any { it > 18 }
@@ -571,7 +599,12 @@ object PatternFinder {
                 "About ${Math.round(mean)} quick checks (under 2 minutes) an hour in your busiest twelve hours" +
                     (if (!wraps) ", ${hh(from)} to ${hh(to)}" else "") +
                     (if (top.isNotEmpty()) ", mostly ${top.joinToString(", ")}" else "") +
-                    ". They add little time, but each one breaks up what you were doing.",
+                    ". They add little time, but each one breaks up what you were doing." +
+                    byNotes.joinToString("") { (pkg, vs) -> " ${Format.percent(nudged[pkg] ?: 0f)} of your ${vs.first().appName} checks come right after its notifications." } +
+                    (if (bySelf.isNotEmpty()) " ${names(bySelf)} you open yourself, not from a notification." else ""),
+            packageName = action?.key,
+            appName = action?.value?.first()?.appName,
+            action = if (action != null) PatternAction.APP_NOTIFICATIONS else PatternAction.NONE,
             strength = 0.45f,
         )
     }

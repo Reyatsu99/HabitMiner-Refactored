@@ -14,6 +14,11 @@ HabitMiner Extended 2.2 adds **Your patterns**: things that are true about how o
 | **Checking all day** | Quick checks (under 2 minutes) averaged over the busiest twelve hours, shown at 10+ an hour. | One user: about 15 an hour, every day; the other: about 6, so nothing shown. The original idea, a "checking peak hour", never fired: per-hour checking was flat for both. |
 | **Last night** | A record (the longest visit starting between 00:00 and 05:00 in two weeks, 30+ min), or a win (3+ nights in a row without a 15+ min visit after midnight, when that used to happen on at least half of nights). | The record fired on about 1 in 10 days; neither user went more than 3 nights in a row without one, so the win is reachable but not automatic. |
 
+## Checked for 2.4
+
+- **What to do about checking all day.** For the top three quick-check apps, the share of checks that came within a minute of the app's own notification: for one user, about 40% for the main messenger but 0–2% for the other two; for the other user, 43% for the messenger and 14–20% for the rest. So quieter notifications help only some apps. The card offers notification settings only for an app where at least 30% of checks follow its notifications, and says which apps you open by yourself. It never offers a pause for chat apps you check dozens of times a day.
+- **Weeknights only.** Long sessions after 23:00 were spread evenly over the week for both users (69–70% on Sunday to Thursday nights, against 71% if evenly spread), but they cost sleep only before weekdays. So the night pause offered from the sleep pattern applies Sunday to Thursday nights by default, with "every night" as the other choice; the long-sessions pattern pauses every night.
+
 ## Kept behind a strict threshold
 
 - **Busiest hours** (a "danger zone"): shown only when two hours hold 25%+ of screen time (an even spread is about 12%). Neither user ever reached it in any week (highest 22%), but it is kept for people whose use is concentrated.

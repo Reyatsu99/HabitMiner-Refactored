@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import java.time.ZoneId
 import javax.inject.Inject
@@ -38,8 +39,20 @@ class AppDetailViewModel
         private val contextRepository: ContextRepository,
         private val habitRepository: HabitRepository,
         private val appIdentityResolver: com.habitminer.domain.AppIdentityResolver,
+        private val appRoles: com.habitminer.repository.AppRoles,
+        private val analysisRepository: com.habitminer.engine.AnalysisRepository,
     ) : ViewModel() {
         val packageName: String = savedState.get<String>(ARG_PACKAGE).orEmpty()
+
+        /** Your role for this app, or null for its own category. */
+        val role: StateFlow<com.habitminer.repository.AppRole?> =
+            appRoles.roles.map { it[packageName] }.stateIn(viewModelScope, SharingStarted.Eagerly, appRoles.roles.value[packageName])
+
+        fun setRole(role: com.habitminer.repository.AppRole?) {
+            appRoles.set(packageName, role)
+            // Patterns are worked out with roles applied: redo them.
+            analysisRepository.invalidate()
+        }
 
         val state: StateFlow<AppDetailState> =
             flow {

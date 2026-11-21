@@ -127,6 +127,7 @@ fun PatternCard(
                         pattern.packageName,
                         pattern.appName ?: pattern.packageName,
                         nightFrom = pattern.nightFromMinute.takeIf { pattern.action == PatternAction.PAUSE_APP_AT_NIGHT },
+                        reason = pattern.title,
                     )
                 }
             PatternAction.APP_NOTIFICATIONS ->
@@ -162,15 +163,18 @@ fun PatternCard(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = LocalDataColors.current.goodHue.text, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("Night pause on for $names", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f, fill = false))
+                            val when_ = if (pattern.apps.all { it.first in guards.weeknightsOnly }) "on weeknights" else "every night"
+                            Text("Night pause on for $names, $when_", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f, fill = false))
                             TextButton(onClick = guards.onOpenGoals) { Text("Edit", color = hue.text) }
                         }
                     } else {
-                        HueTonalButton(
-                            "Pause $names after ${com.habitminer.analytics.Format.clockFromMinutes(from)}",
-                            hue,
-                            { pattern.apps.forEach { (pkg, _) -> guards.onGuard(pkg, true, from) } },
-                        )
+                        // Late nights cost sleep before weekdays; weekends are often late on purpose.
+                        fun guard(weeknights: Boolean) =
+                            pattern.apps.forEach { (pkg, _) -> guards.onGuard(GuardRequest(pkg, true, from, weeknights, pattern.title)) }
+                        HueTonalButton("Pause $names after ${com.habitminer.analytics.Format.clockFromMinutes(from)} on weeknights", hue, { guard(true) })
+                        TextButton(onClick = { guard(false) }, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 0.dp)) {
+                            Text("Every night instead", color = hue.text)
+                        }
                     }
                 }
                 TextButton(onClick = onOpenSleep, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 0.dp)) {

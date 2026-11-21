@@ -59,7 +59,8 @@ import java.util.Locale
 fun AppDetailRoute(onBack: () -> Unit) {
     val vm: AppDetailViewModel = hiltViewModel()
     val state by vm.state.collectAsStateWithLifecycle()
-    AppDetailContent(vm.packageName, state, onBack)
+    val role by vm.role.collectAsStateWithLifecycle()
+    AppDetailContent(vm.packageName, state, onBack, role = role, onRole = vm::setRole)
 }
 
 @Composable
@@ -67,6 +68,8 @@ fun AppDetailContent(
     packageName: String,
     state: AppDetailState,
     onBack: () -> Unit,
+    role: com.habitminer.repository.AppRole? = null,
+    onRole: (com.habitminer.repository.AppRole?) -> Unit = {},
 ) {
     val d = state.detail
     LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 32.dp)) {
@@ -85,7 +88,10 @@ fun AppDetailContent(
                 item(key = "empty") {
                     EmptyState("No recent use", "This app hasn't been used in the last five weeks, so there's nothing to show yet.")
                 }
-            else -> detail(d, state.routines, state.hook)
+            else -> {
+                detail(d, state.routines, state.hook)
+                item(key = "role") { RoleChoice(d.category, role, onRole) }
+            }
         }
     }
 }
@@ -245,4 +251,35 @@ private fun WeekdayHourGrid(grid: Array<IntArray>) {
             }
         }
     }
+}
+
+/**
+ * For apps that are sometimes work and sometimes not (YouTube for lectures, a browser): whether
+ * your patterns treat it as leisure. Work apps aren't flagged for long or late sessions.
+ */
+@Composable
+private fun RoleChoice(
+    category: com.habitminer.analytics.AppCategory,
+    role: com.habitminer.repository.AppRole?,
+    onRole: (com.habitminer.repository.AppRole?) -> Unit,
+) {
+    SectionHeader(
+        "What it is for you",
+        info =
+            "Your patterns treat leisure apps (social, video, games) differently from work and study: long or late sessions in a " +
+                "work app aren't flagged, and they don't count when checking whether saved time moved to another app.",
+    )
+    val auto = if (category.isLeisure) "Leisure" else "Not leisure"
+    val options = listOf(null to "Automatic", com.habitminer.repository.AppRole.LEISURE to "Leisure", com.habitminer.repository.AppRole.WORK to "Work or study")
+    androidx.compose.material3.SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth().padding(horizontal = ScreenPadding)) {
+        options.forEachIndexed { i, (r, label) ->
+            androidx.compose.material3.SegmentedButton(
+                selected = role == r,
+                onClick = { onRole(r) },
+                shape = androidx.compose.material3.SegmentedButtonDefaults.itemShape(i, options.size),
+                colors = com.habitminer.ui.design.hueSegmentedColors(LocalDataColors.current.freeHue),
+            ) { Text(label, maxLines = 1) }
+        }
+    }
+    Note("Automatic: ${category.label}, so ${auto.lowercase()}. Change it if that's not how you use it.")
 }

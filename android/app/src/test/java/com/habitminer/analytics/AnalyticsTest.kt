@@ -1717,6 +1717,41 @@ class PatternsTest {
     }
 
     @Test
+    fun weeknightsOnlyNightWindow() {
+        val W = java.time.DayOfWeek.FRIDAY
+        // Friday 23:30 is a Friday night: not a weeknight.
+        assertFalse(NightWindow.contains(23 * 60 + 30, 23 * 60, W, weeknightsOnly = true))
+        assertTrue(NightWindow.contains(23 * 60 + 30, 23 * 60, W, weeknightsOnly = false))
+        // Friday 01:00 still belongs to Thursday night.
+        assertTrue(NightWindow.contains(60, 23 * 60, W, weeknightsOnly = true))
+        // Sunday 23:30 (before Monday) counts; Saturday 01:00 (Friday night) doesn't.
+        assertTrue(NightWindow.contains(23 * 60 + 30, 23 * 60, java.time.DayOfWeek.SUNDAY, weeknightsOnly = true))
+        assertFalse(NightWindow.contains(60, 23 * 60, java.time.DayOfWeek.SATURDAY, weeknightsOnly = true))
+    }
+
+    @Test
+    fun checkingAllDayPointsAtNotificationsOnlyWhereTheyLead() {
+        val sessions = mutableListOf<UsageSession>()
+        val notes = mutableListOf<NotificationEvent>()
+        for (day in 1..5) {
+            for (h in 9..21) {
+                for (k in 0 until 6) {
+                    // Chat: every check follows its notification. Snap: opened by hand.
+                    val t = at(d(day), h, k * 10)
+                    notes += NotificationEvent(t - 20_000, "pkg.chat")
+                    sessions += UsageSession("pkg.chat", "Chat", AppCategory.MESSAGING, t, t + 30_000, 30_000)
+                    val u = t + 5 * MIN
+                    sessions += UsageSession("pkg.snap", "Snap", AppCategory.SOCIAL, u, u + 40_000, 40_000)
+                }
+            }
+        }
+        val p = PatternFinder.find(sessions, notes, emptyList(), emptyList(), d(6), at(d(6), 10, 0), ZONE).first { it.kind == PatternKind.CHECKING_PEAK }
+        assertEquals(PatternAction.APP_NOTIFICATIONS, p.action)
+        assertEquals("pkg.chat", p.packageName)
+        assertTrue(p.detail, p.detail.contains("Snap you open yourself"))
+    }
+
+    @Test
     fun spilloverToOtherLeisureApps() {
         val since = at(d(30), 12, 0)
         val daily = HashMap<LocalDate, Long>()

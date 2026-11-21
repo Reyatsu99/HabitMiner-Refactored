@@ -580,7 +580,7 @@ private fun DeviationPanel(
         Text(dev.detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         guardApp?.let { (pkg, name) ->
             Spacer(Modifier.height(10.dp))
-            com.habitminer.ui.design.GuardActions(pkg, name)
+            com.habitminer.ui.design.GuardActions(pkg, name, reason = dev.title)
         }
         Spacer(Modifier.height(14.dp))
         when (feedback) {

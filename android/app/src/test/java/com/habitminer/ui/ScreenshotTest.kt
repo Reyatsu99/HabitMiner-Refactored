@@ -104,7 +104,7 @@ class ScreenshotTest {
                 useLess = data.state.appSummaries.take(2).map { it.packageName }.toSet(),
                 pauseEnabled = true,
                 serviceOn = true,
-                onGuard = { _, _, _ -> },
+                onGuard = { },
                 onOpenGoals = {},
             )
 
@@ -492,6 +492,7 @@ class ScreenshotTest {
                 reduced = true,
                 context = com.habitminer.analytics.PauseContext(visitsToday = 9, visitsLastHour = 6, usedTodayMs = 95 * 60_000L, usualVisitMs = 20 * 60_000L),
                 focusUntil = null,
+                reason = "2 long ${app.appName} sessions a day make up 63% of its time",
                 onOpen = {},
                 onLeave = {},
                 onEndFocus = {},

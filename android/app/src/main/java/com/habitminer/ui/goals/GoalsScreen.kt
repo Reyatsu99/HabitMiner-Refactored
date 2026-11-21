@@ -125,7 +125,17 @@ fun GoalsScreen(
             if (goals.useLess.isEmpty()) {
                 Note("Pick apps you'd like to spend less time in. You'll see how this week compares with last week.")
             } else {
-                AppGoalRows(goals.useLess, byPackage, less = true, today = today, impacts = impacts, nightOnly = goals.pauseFrom.keys, onOpenApp = onOpenApp)
+                AppGoalRows(
+                    goals.useLess,
+                    byPackage,
+                    less = true,
+                    today = today,
+                    impacts = impacts,
+                    nightOnly = goals.pauseFrom.keys,
+                    onOpenApp = onOpenApp,
+                    goals = goals,
+                    onChange = onChange,
+                )
             }
         }
 
@@ -305,6 +315,8 @@ private fun AppGoalRows(
     impacts: Map<String, com.habitminer.analytics.GoalImpact> = emptyMap(),
     /** Apps paused only at night. */
     nightOnly: Set<String> = emptySet(),
+    goals: Goals? = null,
+    onChange: ((Goals) -> Goals) -> Unit = {},
 ) {
     RowGroup {
         packages.forEach { pkg ->
@@ -332,6 +344,28 @@ private fun AppGoalRows(
                     if (days.isNotEmpty()) {
                         GoalDots(days, labels = false, modifier = Modifier.padding(start = 68.dp, bottom = 12.dp))
                     }
+                    goals?.pauseFrom?.get(pkg)?.let { from ->
+                        val weeknights = pkg in goals.weeknightsOnly
+                        Row(modifier = Modifier.padding(start = 68.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "Paused after ${Format.clockFromMinutes(from)}, ${if (weeknights) "Sun to Thu nights" else "every night"}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.weight(1f),
+                            )
+                            TextButton(onClick = {
+                                onChange { g -> g.copy(weeknightsOnly = if (weeknights) g.weeknightsOnly - pkg else g.weeknightsOnly + pkg) }
+                            }) { Text(if (weeknights) "Every night" else "Weeknights only", color = LocalDataColors.current.pickupsHue.text) }
+                        }
+                    }
+                    goals?.reasons?.get(pkg)?.let { why ->
+                        Text(
+                            "Why: $why",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(start = 68.dp, end = 16.dp, bottom = 10.dp),
+                        )
+                    }
                     impacts[pkg]?.let { im ->
                         val good = !im.tooEarly && im.afterPerDayMs != null && im.beforePerDayMs != null && im.afterPerDayMs < im.beforePerDayMs
                         Row(modifier = Modifier.padding(start = 68.dp, end = 16.dp, bottom = 14.dp), verticalAlignment = Alignment.Top) {
@@ -355,7 +389,7 @@ private fun AppGoalRows(
                                 val guards = com.habitminer.ui.design.LocalAppGuards.current
                                 if (pkg !in nightOnly && guards != null) {
                                     TextButton(
-                                        onClick = { guards.onGuard(pkg, true, 23 * 60) },
+                                        onClick = { guards.onGuard(com.habitminer.ui.design.GuardRequest(pkg, true, 23 * 60)) },
                                         contentPadding = PaddingValues(horizontal = 0.dp),
                                     ) { Text("Pause only after 23:00", color = LocalDataColors.current.stepsHue.text) }
                                 }

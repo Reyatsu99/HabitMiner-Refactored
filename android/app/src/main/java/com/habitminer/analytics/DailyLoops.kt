@@ -175,10 +175,14 @@ object NightWindow {
     fun contains(
         minute: Int,
         from: Int,
-    ): Boolean =
-        if (from >= END_MINUTE) {
-            minute >= from || minute < END_MINUTE
-        } else {
-            minute in from until END_MINUTE
-        }
+        /** Today's day; with [weeknightsOnly], only nights before a weekday count. */
+        day: java.time.DayOfWeek? = null,
+        weeknightsOnly: Boolean = false,
+    ): Boolean {
+        val inWindow = if (from >= END_MINUTE) minute >= from || minute < END_MINUTE else minute in from until END_MINUTE
+        if (!inWindow || !weeknightsOnly || day == null) return inWindow
+        // Before midnight the night belongs to today; after midnight, to yesterday.
+        val evening = if (minute >= END_MINUTE) day else day.minus(1)
+        return evening != java.time.DayOfWeek.FRIDAY && evening != java.time.DayOfWeek.SATURDAY
+    }
 }

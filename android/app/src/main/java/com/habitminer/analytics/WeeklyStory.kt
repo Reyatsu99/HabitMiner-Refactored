@@ -16,6 +16,8 @@ data class StoryCard(
     val body: String,
     /** Optional per-day values for a small bar strip (Mon…Sun order of the week shown). */
     val bars: List<Pair<String, Long>> = emptyList(),
+    /** For "Try this week": the pattern whose action the card offers to start. */
+    val pattern: Pattern? = null,
 ) {
     enum class Kind { WEEK, PHONE_FREE, ROUTINE, CHANGE, SLEEP, MILESTONES, PATTERN, GOALS, EXPERIMENT }
 }
@@ -189,8 +191,9 @@ object WeeklyStoryBuilder {
                 )
         }
 
-        // 9. One small experiment, from the week's own data.
-        cards += experiment(thisWeek, useLess, avg, zone)
+        // 9. One thing to try: the biggest lever among your patterns that isn't set up yet,
+        // else one small experiment from the week's own data.
+        cards += lever(found, useLess) ?: experiment(thisWeek, useLess, avg, zone)
 
         // Month heatmap: five full weeks ending this week, Monday first.
         val lastMonday = to.minusDays((to.dayOfWeek.value - 1).toLong())
@@ -200,6 +203,48 @@ object WeeklyStoryBuilder {
                 d to (if (d.isAfter(today)) null else byDay[d]?.sumOf { it.durationMs } ?: if (d.isBefore(sessions.minOfOrNull { TimeUtil.dateOf(it.start, zone) } ?: today)) null else 0L)
             }.toList()
         return WeeklyStory(from, to, cards, month)
+    }
+
+    /**
+     * The one pattern most worth acting on this week, if any isn't acted on yet: late weekday
+     * nights first (sleep), then long sessions, notifications that pull you in, and checking.
+     * Next week's "Is it working?" card shows how it went.
+     */
+    private fun lever(
+        found: List<Pattern>,
+        useLess: Set<String>,
+    ): StoryCard? {
+        val order =
+            listOf(PatternKind.LATE_WEEKDAY_SLEEP, PatternKind.LONG_SESSIONS, PatternKind.NOTIFICATION_PULL, PatternKind.CHECKING_PEAK, PatternKind.LEAD_IN)
+        val open =
+            found.filter { p ->
+                when (p.action) {
+                    PatternAction.PAUSE_APPS_AT_NIGHT -> p.apps.any { it.first !in useLess }
+                    PatternAction.PAUSE_APP, PatternAction.PAUSE_APP_AT_NIGHT -> p.packageName != null && p.packageName !in useLess
+                    PatternAction.APP_NOTIFICATIONS -> p.packageName != null
+                    else -> false
+                }
+            }
+        val p = open.minByOrNull { order.indexOf(it.kind).let { i -> if (i < 0) order.size else i } } ?: return null
+        val headline =
+            when (p.action) {
+                PatternAction.PAUSE_APPS_AT_NIGHT -> "Pause ${PatternFinder.appNames(p.apps)} after ${Format.clockFromMinutes(p.nightFromMinute ?: 23 * 60)} on weeknights"
+                PatternAction.PAUSE_APP_AT_NIGHT -> "Pause ${p.appName} after ${Format.clockFromMinutes(p.nightFromMinute ?: 23 * 60)}"
+                PatternAction.APP_NOTIFICATIONS -> "Quieter ${p.appName} notifications"
+                else -> "A pause before ${p.appName}"
+            }
+        return StoryCard(
+            StoryCard.Kind.EXPERIMENT,
+            "Try this week",
+            headline,
+            "Why: ${p.title.replaceFirstChar { it.lowercase() }}. " +
+                if (p.action == PatternAction.APP_NOTIFICATIONS) {
+                    "Turn its notifications down for 7 days and see whether the long sessions drop."
+                } else {
+                    "Try it for 7 days; next Sunday's Story shows whether it worked."
+                },
+            pattern = p,
+        )
     }
 
     private fun experiment(

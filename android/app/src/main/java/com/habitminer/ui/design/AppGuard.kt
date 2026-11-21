@@ -25,6 +25,20 @@ import com.habitminer.ui.theme.LocalDataColors
  * Where an app stands with your goals, and how to change it from anywhere an insight or a
  * routine mentions the app.
  */
+/** What to set up for one app. */
+@Immutable
+data class GuardRequest(
+    val packageName: String,
+    /** Also switch the mindful pause on (otherwise just Use less). */
+    val pause: Boolean,
+    /** Pause only at night, from this minute of the day until 05:00. */
+    val nightFrom: Int? = null,
+    /** ...and only on the nights before a weekday (Sunday to Thursday). */
+    val weeknightsOnly: Boolean = false,
+    /** Why, in a line, shown on the pause screen: usually the pattern it came from. */
+    val reason: String? = null,
+)
+
 @Immutable
 data class AppGuards(
     /** Apps on your Use less list. */
@@ -35,11 +49,13 @@ data class AppGuards(
     val serviceOn: Boolean,
     /** Apps paused only at night, from this minute of the day. */
     val pauseFrom: Map<String, Int> = emptyMap(),
+    /** Of those, the ones paused only on weeknights. */
+    val weeknightsOnly: Set<String> = emptySet(),
     /**
      * Put the app on Use less; with [pause], also switch the mindful pause on, and with a
      * night start (minute of the day) pause it only from then until 05:00.
      */
-    val onGuard: (packageName: String, pause: Boolean, nightFrom: Int?) -> Unit,
+    val onGuard: (GuardRequest) -> Unit,
     val onOpenGoals: () -> Unit,
 ) {
     val pauseWorks: Boolean get() = pauseEnabled && serviceOn
@@ -59,6 +75,8 @@ fun GuardActions(
     modifier: Modifier = Modifier,
     /** Suggest pausing only at night, from this minute of the day. */
     nightFrom: Int? = null,
+    /** Shown on the pause screen: why you set it up. */
+    reason: String? = null,
 ) {
     val guards = LocalAppGuards.current ?: return
     if (packageName == null) return
@@ -67,11 +85,11 @@ fun GuardActions(
     if (!listed) {
         Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             if (nightFrom != null) {
-                HueTonalButton("Pause after ${com.habitminer.analytics.Format.clockFromMinutes(nightFrom)}", hue, { guards.onGuard(packageName, true, nightFrom) })
-                TextButton(onClick = { guards.onGuard(packageName, true, null) }) { Text("Always", color = hue.text) }
+                HueTonalButton("Pause after ${com.habitminer.analytics.Format.clockFromMinutes(nightFrom)}", hue, { guards.onGuard(GuardRequest(packageName, true, nightFrom, reason = reason)) })
+                TextButton(onClick = { guards.onGuard(GuardRequest(packageName, true, reason = reason)) }) { Text("Always", color = hue.text) }
             } else {
-                HueTonalButton("Pause before $appName", hue, { guards.onGuard(packageName, true, null) })
-                TextButton(onClick = { guards.onGuard(packageName, false, null) }) { Text("Use less", color = hue.text) }
+                HueTonalButton("Pause before $appName", hue, { guards.onGuard(GuardRequest(packageName, true, reason = reason)) })
+                TextButton(onClick = { guards.onGuard(GuardRequest(packageName, false, reason = reason)) }) { Text("Use less", color = hue.text) }
             }
         }
         return
@@ -81,7 +99,9 @@ fun GuardActions(
         Spacer(Modifier.width(6.dp))
         Text(
             when {
-                guards.pauseWorks -> guards.pauseFrom[packageName]?.let { "Pause on for $appName after ${com.habitminer.analytics.Format.clockFromMinutes(it)}" } ?: "Pause on before $appName"
+                guards.pauseWorks -> guards.pauseFrom[packageName]?.let {
+                    "Pause on for $appName after ${com.habitminer.analytics.Format.clockFromMinutes(it)}" + if (packageName in guards.weeknightsOnly) ", weeknights" else ""
+                } ?: "Pause on before $appName"
                 guards.pauseEnabled -> "On Use less; the pause needs Accessibility"
                 else -> "On your Use less list"
             },
@@ -92,9 +112,9 @@ fun GuardActions(
         if (guards.pauseWorks) {
             TextButton(onClick = guards.onOpenGoals) { Text("Edit", color = hue.text) }
         } else if (guards.pauseEnabled) {
-            TextButton(onClick = { guards.onGuard(packageName, true, guards.pauseFrom[packageName]) }) { Text("Turn on", color = hue.text) }
+            TextButton(onClick = { guards.onGuard(GuardRequest(packageName, true, guards.pauseFrom[packageName], packageName in guards.weeknightsOnly)) }) { Text("Turn on", color = hue.text) }
         } else {
-            TextButton(onClick = { guards.onGuard(packageName, true, nightFrom) }) { Text("Add a pause", color = hue.text) }
+            TextButton(onClick = { guards.onGuard(GuardRequest(packageName, true, nightFrom, reason = reason)) }) { Text("Add a pause", color = hue.text) }
         }
     }
 }

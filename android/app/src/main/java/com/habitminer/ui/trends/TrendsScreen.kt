@@ -720,7 +720,7 @@ private fun RoutineSheet(
                     Text(name, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
                 }
                 Spacer(Modifier.height(4.dp))
-                com.habitminer.ui.design.GuardActions(pkg, name)
+                com.habitminer.ui.design.GuardActions(pkg, name, reason = "Part of your routine ${group.sequence}")
             }
         }
     }

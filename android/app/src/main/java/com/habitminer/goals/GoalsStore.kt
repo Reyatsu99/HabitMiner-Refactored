@@ -26,6 +26,10 @@ data class Goals(
     val since: Map<String, Long> = emptyMap(),
     /** Use less apps paused only at night: from this minute of the day until 05:00. */
     val pauseFrom: Map<String, Int> = emptyMap(),
+    /** Of those, the ones paused only on the nights before a weekday (Sunday to Thursday). */
+    val weeknightsOnly: Set<String> = emptySet(),
+    /** Why you set each one up, in a line (shown on the pause screen). */
+    val reasons: Map<String, String> = emptyMap(),
 ) {
     fun intentionFor(day: LocalDate): String? = intention?.takeIf { intentionDate == day }
 }
@@ -53,6 +57,8 @@ class GoalsStore
                 changed.copy(
                     since = changed.useLess.associateWith { changed.since[it] ?: now },
                     pauseFrom = changed.pauseFrom.filterKeys { it in changed.useLess },
+                    weeknightsOnly = changed.weeknightsOnly.filter { it in changed.pauseFrom },
+                    reasons = changed.reasons.filterKeys { it in changed.useLess },
                 )
             prefs.edit()
                 .putInt(KEY_TARGET, next.dailyTargetMinutes ?: -1)
@@ -63,6 +69,8 @@ class GoalsStore
                 .putString(KEY_INTENTION_DATE, next.intentionDate?.toString())
                 .putString(KEY_SINCE, next.since.entries.joinToString(SEP) { "${it.key}=${it.value}" })
                 .putString(KEY_PAUSE_FROM, next.pauseFrom.entries.joinToString(SEP) { "${it.key}=${it.value}" })
+                .putString(KEY_WEEKNIGHTS, next.weeknightsOnly.joinToString(SEP))
+                .putString(KEY_REASONS, next.reasons.entries.joinToString(SEP) { "${it.key}=${it.value.replace('\n', ' ')}" })
                 .apply()
             _goals.value = next
         }
@@ -77,6 +85,13 @@ class GoalsStore
                 intentionDate = prefs.getString(KEY_INTENTION_DATE, null)?.let { runCatching { LocalDate.parse(it) }.getOrNull() },
                 since = pairs(KEY_SINCE) { it.toLongOrNull() },
                 pauseFrom = pairs(KEY_PAUSE_FROM) { it.toIntOrNull() },
+                weeknightsOnly = prefs.getString(KEY_WEEKNIGHTS, "").orEmpty().split(SEP).filter { it.isNotBlank() }.toSet(),
+                reasons =
+                    prefs.getString(KEY_REASONS, "").orEmpty().split(SEP).mapNotNull { line ->
+                        // Package names have no "=", so the first one splits it.
+                        val i = line.indexOf('=')
+                        if (i <= 0) null else line.substring(0, i) to line.substring(i + 1)
+                    }.toMap(),
             )
 
         private fun <T> pairs(
@@ -98,5 +113,7 @@ class GoalsStore
             private const val KEY_INTENTION_DATE = "intention_date"
             private const val KEY_SINCE = "use_less_since"
             private const val KEY_PAUSE_FROM = "pause_from"
+            private const val KEY_WEEKNIGHTS = "weeknights_only"
+            private const val KEY_REASONS = "reasons"
         }
     }

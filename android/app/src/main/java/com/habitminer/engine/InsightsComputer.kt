@@ -124,6 +124,7 @@ class InsightsComputer
         private val insightRepository: com.habitminer.repository.InsightRepository,
         private val goalsStore: com.habitminer.goals.GoalsStore,
         private val patternPrefs: com.habitminer.repository.PatternPrefs,
+        private val appRoles: com.habitminer.repository.AppRoles,
     ) {
         suspend fun compute(
             allUsage: List<AppUsageEntity>,
@@ -251,10 +252,12 @@ class InsightsComputer
                 )
             val insight = runCatching { insightRepository.todaysInsight(candidates, today, now) }.getOrNull()
 
+            // Your own roles for dual-purpose apps (a study YouTube) decide what counts as leisure.
+            val roled = appRoles.apply(sessions)
             val patterns =
                 runCatching {
                     val hidden = patternPrefs.hidden.value
-                    com.habitminer.analytics.PatternFinder.find(sessions, notificationEvents, unlocks, routine.nights, today, now, zone)
+                    com.habitminer.analytics.PatternFinder.find(roled, notificationEvents, unlocks, routine.nights, today, now, zone)
                         .filterNot { it.key in hidden }
                 }.getOrDefault(emptyList())
             // Use less apps: pauses answered and time against before.
@@ -273,7 +276,7 @@ class InsightsComputer
                         // Every day with any data counts (as 0 for an app), so quiet days aren't lost.
                         val dataDays = sessions.map { TimeUtil.dateOf(it.start, zone) }.toSet()
                         val leisure =
-                            sessions.filter { it.category.isLeisure }.groupBy { it.packageName }.mapValues { (_, l) ->
+                            roled.filter { it.category.isLeisure }.groupBy { it.packageName }.mapValues { (_, l) ->
                                 val m = HashMap<java.time.LocalDate, Long>()
                                 dataDays.forEach { m[it] = 0L }
                                 l.forEach { m.merge(TimeUtil.dateOf(it.start, zone), it.durationMs, Long::plus) }

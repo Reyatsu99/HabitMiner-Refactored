@@ -33,6 +33,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -152,6 +153,7 @@ private fun StoryCardView(card: StoryCard) {
         if (card.body.isNotEmpty()) {
             Text(card.body, style = MaterialTheme.typography.bodyLarge, color = onColor.copy(alpha = 0.9f))
         }
+        card.pattern?.let { p -> TryButton(p, onColor) }
         if (card.bars.isNotEmpty()) {
             Spacer(Modifier.weight(1f, fill = false))
             Spacer(Modifier.height(20.dp))
@@ -243,4 +245,42 @@ private fun MonthHeatmap(story: WeeklyStory) {
             Text("More", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
+}
+
+/** Starts "Try this week": the pattern's pause, or its app's notification settings. */
+@Composable
+private fun TryButton(
+    p: com.habitminer.analytics.Pattern,
+    onColor: androidx.compose.ui.graphics.Color,
+) {
+    val guards = com.habitminer.ui.design.LocalAppGuards.current ?: return
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var started by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    Spacer(Modifier.height(16.dp))
+    if (started) {
+        Text("Started. Next Sunday's Story shows how it went.", style = MaterialTheme.typography.titleSmall, color = onColor)
+        return
+    }
+    androidx.compose.material3.Button(
+        onClick = {
+            when (p.action) {
+                com.habitminer.analytics.PatternAction.PAUSE_APPS_AT_NIGHT -> p.apps.forEach { (pkg, _) -> guards.onGuard(com.habitminer.ui.design.GuardRequest(pkg, true, p.nightFromMinute ?: 23 * 60, true, p.title)) }
+                com.habitminer.analytics.PatternAction.PAUSE_APP_AT_NIGHT -> p.packageName?.let { guards.onGuard(com.habitminer.ui.design.GuardRequest(it, true, p.nightFromMinute ?: 23 * 60, reason = p.title)) }
+                com.habitminer.analytics.PatternAction.PAUSE_APP -> p.packageName?.let { guards.onGuard(com.habitminer.ui.design.GuardRequest(it, true, reason = p.title)) }
+                com.habitminer.analytics.PatternAction.APP_NOTIFICATIONS ->
+                    p.packageName?.let { pkg ->
+                        runCatching {
+                            context.startActivity(
+                                android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                    .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, pkg)
+                                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                            )
+                        }
+                    }
+                else -> Unit
+            }
+            started = true
+        },
+        colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = onColor, contentColor = androidx.compose.ui.graphics.Color(0xFF151518)),
+    ) { Text("Try it for 7 days") }
 }
