@@ -12,7 +12,7 @@ This branch introduces a bounded, PrefixSpan-style sequential pattern miner for 
   - Adds the sequential pattern mining data structures and algorithm.
   - Collapses same-package sessions only when separated by at most five minutes; longer gaps remain separate visits.
   - Mines variable-length ordered subsequences, including patterns with intervening app events.
-  - Counts support by distinct input sequence/day index.
+  - Counts support once per unique day key, even if duplicate input entries are supplied.
   - Applies maximum pattern length and maximum transition-gap bounds.
 - `android/app/src/main/java/com/habitminer/engine/HabitEngine.kt`
   - Integrates sequential mining into habit discovery.
@@ -49,7 +49,7 @@ Default parameters:
 | Maximum pattern length | 4 app tokens |
 | Maximum transition gap | 15 minutes |
 
-Support is counted once per input day index, regardless of how many matching occurrences exist on that day. Patterns below minimum support are pruned during expansion.
+Support is counted once per unique day key, regardless of duplicate input entries or how many matching occurrences exist on that day. Invalid intervals are discarded, and overlapping intervals are not accepted as sequential transitions. Patterns below minimum support are pruned during expansion.
 
 ### 5. Habit-engine integration
 
