@@ -11,13 +11,21 @@ class TimeConditionedMarkovModel:
         
     def fit(self, sequences: Dict[str, List[List[str]]]):
         """
-        Sequences dict key: "user_id|day_type|time_slot"
+        Sequences dict key: "user_id|day_type|time_slot".
+        Each call replaces the previous fitted state.
         """
+        self.transitions.clear()
+        self.state_counts.clear()
+        self.vocab.clear()
+
         # First pass to build vocab and raw counts
         raw_transitions = {}
         
         for key, daily_seqs in sequences.items():
-            _, day_type, time_slot = key.split("|")
+            parts = key.split("|")
+            if len(parts) != 3:
+                raise ValueError(f"Invalid sequence key: {key!r}")
+            _, day_type, time_slot = parts
             time_bin = f"{day_type}_{time_slot}"
             
             if time_bin not in raw_transitions:
@@ -55,6 +63,8 @@ class TimeConditionedMarkovModel:
                     self.transitions[time_bin][s1][s2] = prob
                     
     def predict_next(self, current_state: str, day_type: str, time_slot: str, top_k: int = 1) -> List[Tuple[str, float]]:
+        if top_k < 1:
+            raise ValueError("top_k must be at least 1")
         time_bin = f"{day_type}_{time_slot}"
         
         if time_bin not in self.transitions or current_state not in self.transitions[time_bin]:
@@ -63,13 +73,15 @@ class TimeConditionedMarkovModel:
                 return []
             prob = 1.0 / len(self.vocab)
             preds = [(s, prob) for s in self.vocab]
-            return sorted(preds, key=lambda x: x[1], reverse=True)[:top_k]
+            return sorted(preds, key=lambda x: (-x[1], x[0]))[:top_k]
             
         probs = self.transitions[time_bin][current_state]
         preds = [(k, v) for k, v in probs.items()]
         return sorted(preds, key=lambda x: x[1], reverse=True)[:top_k]
 
     def evaluate_predictions(self, test_sequences: Dict[str, List[List[str]]], top_k: int = 3) -> dict:
+        if top_k < 1:
+            raise ValueError("top_k must be at least 1")
         correct_top1 = 0
         correct_topk = 0
         total_predictions = 0
