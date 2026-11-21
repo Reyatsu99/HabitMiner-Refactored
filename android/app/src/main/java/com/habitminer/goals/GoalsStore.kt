@@ -40,6 +40,11 @@ class GoalsStore
         private val _goals = MutableStateFlow(read())
         val goals: StateFlow<Goals> = _goals.asStateFlow()
 
+        init {
+            // Apps put on Use less before 2.2 have no start date: their comparison starts now.
+            if (_goals.value.useLess.any { it !in _goals.value.since }) update { it }
+        }
+
         fun update(change: (Goals) -> Goals) {
             val changed = change(_goals.value)
             // Keep "since" for the apps on Use less: new ones start now, removed ones go.
