@@ -36,6 +36,8 @@ data class WeeklyStory(
  * ending with one small experiment to try. Built only from things HabitMiner already measures.
  */
 object WeeklyStoryBuilder {
+    private const val IMPACT_DAYS = PatternFinder.IMPACT_MIN_DAYS
+
     fun build(
         sessions: List<UsageSession>,
         unlocks: List<Long>,
@@ -172,23 +174,29 @@ object WeeklyStoryBuilder {
             cards += StoryCard(StoryCard.Kind.PATTERN, if (win != null) "A good run" else "A pattern of yours", p.title, p.detail)
         }
 
-        // 8. Is it working? Each Use less app since you added it.
+        // 8. Is it working? Use less apps with a fair comparison, biggest drop first; the
+        // ones still too new are counted in one line, not repeated.
         if (goals.isNotEmpty()) {
-            val (name, first) = goals.first()
+            val ready = goals.filterNot { it.second.tooEarly }
+            val early = goals.filter { it.second.tooEarly }
+            fun drop(im: GoalImpact) = (im.beforePerDayMs ?: 0L) - (im.afterPerDayMs ?: 0L)
+            val best = ready.maxByOrNull { drop(it.second) }
             val headline =
                 when {
-                    first.tooEarly -> "Too early to tell"
-                    first.afterPerDayMs != null && first.beforePerDayMs != null && first.afterPerDayMs < first.beforePerDayMs - 5 * TimeUtil.MINUTE ->
-                        "$name: ${Format.duration(first.beforePerDayMs - first.afterPerDayMs)} less a day"
-                    else -> "$name: no change yet"
+                    best == null -> "Too early to tell"
+                    drop(best.second) > 5 * TimeUtil.MINUTE -> "${best.first}: ${Format.duration(drop(best.second))} less a day"
+                    else -> "No change yet"
                 }
-            cards +=
-                StoryCard(
-                    StoryCard.Kind.GOALS,
-                    "Is it working?",
-                    headline,
-                    goals.joinToString(" ") { (n, im) -> im.summary(n) },
-                )
+            val lines = ready.sortedByDescending { drop(it.second) }.take(3).map { (n, im) -> "$n: ${im.summary(n)}" }.toMutableList()
+            if (early.isNotEmpty()) {
+                val firstReady = early.minOf { TimeUtil.dateOf(it.second.since, zone) }.plusDays(IMPACT_DAYS + 1L)
+                val names = early.map { it.first }
+                val who = if (names.size <= 3) names.joinToString(", ") else "${names.size} apps"
+                lines +=
+                    "$who: added too recently for a fair comparison. The first results come " +
+                    "${firstReady.dayOfWeek.getDisplayName(TextStyle.FULL, Locale.getDefault())} ${firstReady.dayOfMonth} ${firstReady.month.getDisplayName(TextStyle.SHORT, Locale.getDefault())}."
+            }
+            cards += StoryCard(StoryCard.Kind.GOALS, "Is it working?", headline, lines.joinToString("\n\n"))
         }
 
         // 9. One thing to try: the biggest lever among your patterns that isn't set up yet,

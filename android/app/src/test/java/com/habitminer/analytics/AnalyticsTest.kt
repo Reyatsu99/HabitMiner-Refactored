@@ -1796,5 +1796,18 @@ class PatternsTest {
         assertTrue(PatternFinder.upcoming(15, setOf(PatternKind.LATE_WEEKDAY_SLEEP)).isEmpty())
         assertTrue(PatternFinder.upcoming(30).isEmpty())
     }
+
+    @Test
+    fun storyCountsNewGoalsOnceInsteadOfRepeating() {
+        val sessions = (1..7).map { s("YT", d(it), 20, 0, 60, AppCategory.VIDEO) }
+        val since = at(d(8), 1, 0)
+        val goals = (1..8).map { i -> "App $i" to GoalImpact("pkg.$i", since, 0, 0, 0, 0, null, null) }
+        val story = WeeklyStoryBuilder.build(sessions, emptyList(), emptyList(), emptyList(), emptyList(), null, emptySet(), d(8), at(d(8), 9, 0), ZONE, goals = goals)!!
+        val card = story.cards.first { it.kind == StoryCard.Kind.GOALS }
+        assertEquals("Too early to tell", card.headline)
+        assertEquals(card.body, 1, Regex("too recently").findAll(card.body).count())
+        assertTrue(card.body, card.body.startsWith("8 apps: added too recently"))
+        assertTrue(card.body, card.body.contains("14 Oct"))
+    }
 }
 
