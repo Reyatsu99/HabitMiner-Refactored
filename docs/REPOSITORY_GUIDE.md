@@ -30,6 +30,17 @@ These branches are workflow outputs, not application source branches:
 
 The Android workflow creates a branch named `ci-out-<source-branch>` for non-pull-request builds. The older `ci-outputs` and `ci-screenshots` branches are retained legacy output snapshots. Never merge any `ci-*` branch into application source.
 
+## Top-level layout
+
+| Path | Purpose |
+|---|---|
+| `android/` | Native Android application, Gradle wrapper, build configuration, and Kotlin tests |
+| `engine/` | Offline Python evaluation engine for sequential habit mining, time-conditioned Markov prediction, deviation detection, and experiment reports; see `engine/README.md` |
+| `data/` | Small demo fixtures and dataset instructions; raw and personal datasets are excluded by `.gitignore` |
+| `docs/` | Architecture, methodology, findings, project reports, screenshots, archived READMEs, and reference material |
+| `.github/workflows/` | Android build/test and signed release automation |
+
+Keep generated reports and historical documentation under `docs/`, not in the repository root. Keep raw user datasets out of Git; use the documented local data paths and the existing ignore rules.
 ## Application source map
 
 All Android application code lives under `android/app/src/main/java/com/habitminer/`:
