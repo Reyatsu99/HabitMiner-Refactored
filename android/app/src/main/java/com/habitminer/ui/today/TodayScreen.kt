@@ -181,7 +181,7 @@ fun TodayScreen(
         item(key = "top") { TopLine(today, nav::openSettings) }
 
         // Stories, like Instagram's: today's insights, last night, and your week.
-        item(key = "stories") { StoryStrip(stories.bubbles, stories::open) }
+        item(key = "stories") { StoryStrip(stories.bubbles, stories.open) }
         item(key = "hero") {
             TodayRings(state, dailyTargetMinutes, zone)
             Column(modifier = Modifier.padding(horizontal = ScreenPadding)) {
