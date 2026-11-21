@@ -69,4 +69,53 @@ class SequentialPatternMinerTest {
         assertEquals(listOf("A", "B"), patterns.single().appSequence)
         assertEquals(5, patterns.single().occurrences)
     }
+    @Test
+    fun doesNotBridgeLongIdleGapBetweenSameAppVisits() {
+        val days = (0 until 6).map { index ->
+            val start = index * dayMs
+            DailySequence(
+                "day-$index",
+                listOf(
+                    SequenceEvent("pkg.X", "X", start, start + minuteMs),
+                    SequenceEvent("pkg.A", "A", start + minuteMs, start + 2 * minuteMs),
+                    SequenceEvent("pkg.A", "A", start + 120 * minuteMs, start + 121 * minuteMs),
+                    SequenceEvent("pkg.B", "B", start + 122 * minuteMs, start + 123 * minuteMs),
+                ),
+            )
+        }
+
+        val patterns = SequentialPatternMiner.mine(days)
+
+        assertTrue(patterns.any { it.appSequence == listOf("A", "B") })
+        assertTrue(patterns.none { it.appSequence == listOf("X", "A", "B") })
+    }
+
+    @Test
+    fun countsDuplicateDayKeysOnlyOnceForSupport() {
+        val repeated = (0 until 5).map { day(0, "A" to 0, "B" to 2) }
+        val otherDays = (1 until 4).map { day(it, "C" to 0) }
+
+        assertTrue(SequentialPatternMiner.mine(repeated + otherDays).isEmpty())
+    }
+
+    @Test
+    fun ignoresOverlappingEventsWhenBuildingTransitions() {
+        val days = (0 until 6).map { index ->
+            val start = index * dayMs
+            DailySequence(
+                "day-$index",
+                listOf(
+                    SequenceEvent("pkg.A", "A", start, start + 5 * minuteMs),
+                    SequenceEvent("pkg.B", "B", start + 4 * minuteMs, start + 6 * minuteMs),
+                    SequenceEvent("pkg.C", "C", start + 7 * minuteMs, start + 8 * minuteMs),
+                ),
+            )
+        }
+
+        val patterns = SequentialPatternMiner.mine(days)
+
+        assertTrue(patterns.none { it.appSequence == listOf("A", "B") })
+        assertTrue(patterns.any { it.appSequence == listOf("B", "C") })
+    }
+
 }
