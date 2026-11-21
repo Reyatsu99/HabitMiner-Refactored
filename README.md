@@ -333,7 +333,7 @@ More background on the original design is in [docs/ARCHITECTURE.md](docs/ARCHITE
 ## 🚀 Getting started
 
 ### Install
-Pushes to `main` and pull requests targeting `main` run the build and unit-test workflow. Main-branch builds publish screenshots and APKs to `ci-out-main`; pull-request builds upload APKs as workflow artifacts. Release builds are published from version tags such as `v2.4.0`.
+Pushes to `main` and pull requests targeting `main` run the build and unit-test workflow. Main-branch builds publish screenshots and APKs to `ci-out-main`; pull-request builds upload APKs as workflow artifacts. Release builds are published from version tags such as `v2.6.0`.
 
 To bring your history across: in HabitMiner, open Settings and tap **Export data**, then share the ZIP to **HM Extended** (or use **Choose file** on the Today import card).
 
