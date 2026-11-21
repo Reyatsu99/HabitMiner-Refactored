@@ -1,30 +1,18 @@
 package com.habitminer.analytics
 
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.ln
 
-/** Context dimensions that can be related to app-use rates. */
 enum class ContextDimension(val label: String) {
-    LIGHT("light"),
-    PHONE_MOTION("phone movement"),
-    PHONE_ROTATION("phone rotation"),
-    CHARGING("charging"),
-    HEADPHONES("headphone connection"),
-    VEHICLE("vehicle activity"),
-    POWER_SAVER("battery saver"),
-    THERMAL("thermal state"),
+    LIGHT("light"), PHONE_MOTION("phone movement"), PHONE_ROTATION("phone rotation"),
+    CHARGING("charging"), HEADPHONES("headphone connection"), VEHICLE("vehicle activity"),
+    POWER_SAVER("battery saver"), THERMAL("thermal state"),
 }
 
-/**
- * An exposure-adjusted association between an app and one observed context state.
- *
- * Rates use sampled, screen-on exposure rather than raw percentages of app time. The comparison
- * is restricted to matching weekday/weekend and three-hour time-of-day strata. This is descriptive
- * evidence, not a causal claim.
- */
 data class ContextRelationship(
     val appName: String,
     val dimension: ContextDimension,
@@ -56,23 +44,23 @@ data class ContextRelationship(
                 dimension.label + " states. Observed exposure: " +
                 oneDecimal(contextExposureHours) + " h versus " +
                 oneDecimal(comparisonExposureHours) +
-                " h, matched by weekday/weekend and three-hour time window. Association, not causation."
+                " h. Rates are standardized across matching weekday/weekend and three-hour time windows. " +
+                "Association, not causation."
 
     private fun oneDecimal(value: Double): String = String.format(Locale.US, "%.1f", value)
 }
 
 /**
- * Finds repeatable app/context relationships without treating sparse sensor readings as continuous
- * ground truth. Each sample contributes at most 15 minutes of screen-on exposure, and gaps over
- * 30 minutes are not forward-filled. App sessions are divided into five-minute slices and matched
- * to a nearby screen-on sample.
+ * Uses one shared set of bounded observation intervals for both exposure and app-use attribution.
+ * App usage is credited only where it overlaps an interval that contributes denominator exposure.
  *
- * Thresholds are conservative engineering gates; they should be re-evaluated against more users.
+ * Headphone and vehicle dimensions are intentionally omitted until the event stream can distinguish
+ * known false states from unknown periods. Missing positive events must not imply disconnected or
+ * non-vehicle states.
  */
 object ContextualBehaviorAnalyzer {
     private const val MAX_OBSERVATION_GAP_MS = 30 * TimeUtil.MINUTE
     private const val MAX_EXPOSURE_HOLD_MS = 15 * TimeUtil.MINUTE
-    private const val MAX_CONTEXT_DISTANCE_MS = 10 * TimeUtil.MINUTE
     private const val SESSION_SEGMENT_MS = 5 * TimeUtil.MINUTE
     private const val MIN_STRATUM_EXPOSURE_MS = 5 * TimeUtil.MINUTE
     private const val MIN_GROUP_EXPOSURE_MS = 30 * TimeUtil.MINUTE
@@ -85,42 +73,30 @@ object ContextualBehaviorAnalyzer {
     private const val MIN_MATCHED_STRATA = 2
 
     private data class Stratum(val weekend: Boolean, val threeHourBand: Int)
-
-    private data class State(
-        val dimension: ContextDimension,
-        val phrase: String,
-    )
-
-    private data class ExposureKey(
-        val dimension: ContextDimension,
-        val phrase: String,
+    private data class State(val dimension: ContextDimension, val phrase: String)
+    private data class ExposureKey(val dimension: ContextDimension, val phrase: String, val stratum: Stratum)
+    private data class UseKey(val appName: String, val dimension: ContextDimension, val phrase: String, val stratum: Stratum)
+    private data class GroupKey(val appName: String, val dimension: ContextDimension, val phrase: String)
+    private data class Observation(
+        val start: Long,
+        val end: Long,
         val stratum: Stratum,
-    )
-
-    private data class UseKey(
-        val appName: String,
-        val dimension: ContextDimension,
-        val phrase: String,
-        val stratum: Stratum,
-    )
-
-    private data class GroupKey(
-        val appName: String,
-        val dimension: ContextDimension,
-        val phrase: String,
+        val day: LocalDate,
+        val states: List<State>,
     )
 
     private class ExposureAccumulator {
         var durationMs: Long = 0L
-        val days = mutableSetOf<java.time.LocalDate>()
+        val days = mutableSetOf<LocalDate>()
     }
 
     private class UseAccumulator {
         var durationMs: Long = 0L
         val sessionIds = mutableSetOf<Int>()
-        val days = mutableSetOf<java.time.LocalDate>()
+        val days = mutableSetOf<LocalDate>()
     }
 
+    @Suppress("UNUSED_PARAMETER")
     fun compute(
         sessions: List<UsageSession>,
         samples: List<ContextSample>,
@@ -128,7 +104,6 @@ object ContextualBehaviorAnalyzer {
         situations: List<ContextSpan> = emptyList(),
     ): List<ContextRelationship> {
         if (sessions.isEmpty() || samples.size < 2) return emptyList()
-
         val orderedSamples = samples.distinctBy { it.timestamp }.sortedBy { it.timestamp }
         if (orderedSamples.size < 2) return emptyList()
 
@@ -139,196 +114,121 @@ object ContextualBehaviorAnalyzer {
             gyroValues.size >= MIN_GYRO_SAMPLES && gyroValues.distinct().size >= 2
         }
 
-        val spanIndex = SpanIndex(situations)
-        val includeHeadphones = situations.any { it.tag == SpanIndex.HEADPHONES }
-        val includeVehicle = situations.any { it.tag == SpanIndex.VEHICLE }
-        val situationBoundaries =
-            situations.flatMap { listOf(it.start, it.end) }.distinct().sorted()
+        // Both numerator and denominator are computed from these exact, non-overlapping windows.
+        val observations = buildObservations(orderedSamples, zone, gyroMedian)
+        if (observations.isEmpty()) return emptyList()
 
         val exposure = HashMap<ExposureKey, ExposureAccumulator>()
-        val use = HashMap<UseKey, UseAccumulator>()
-        val sampleIndex = SampleIndex(orderedSamples)
-
-        // Exposure is based on consecutive observations, not on app-use duration. Long gaps and
-        // the final unpaired observation are deliberately excluded.
-        for (i in 0 until orderedSamples.lastIndex) {
-            val sample = orderedSamples[i]
-            val next = orderedSamples[i + 1]
-            val gap = next.timestamp - sample.timestamp
-            if (!sample.isScreenOn || gap <= 0L || gap > MAX_OBSERVATION_GAP_MS) continue
-
-            val end = sample.timestamp + minOf(gap, MAX_EXPOSURE_HOLD_MS)
-            addExposureWindow(
-                sample = sample,
-                start = sample.timestamp,
-                end = end,
-                zone = zone,
-                spanIndex = spanIndex,
-                includeHeadphones = includeHeadphones,
-                includeVehicle = includeVehicle,
-                gyroMedian = gyroMedian,
-                situationBoundaries = situationBoundaries,
-                exposure = exposure,
-            )
+        observations.forEach { observation ->
+            observation.states.forEach { state ->
+                val key = ExposureKey(state.dimension, state.phrase, observation.stratum)
+                val accumulator = exposure.getOrPut(key) { ExposureAccumulator() }
+                accumulator.durationMs += observation.end - observation.start
+                accumulator.days += observation.day
+            }
         }
 
-        // Split long sessions so a context change during a session is not represented by just
-        // the context at its midpoint. durationMs is proportionally apportioned over the wall span.
-        sessions.forEachIndexed { sessionId, session ->
+        val use = HashMap<UseKey, UseAccumulator>()
+        sessions.withIndex().sortedBy { it.value.start }.forEach { indexed ->
+            val sessionId = indexed.index
+            val session = indexed.value
             val wallSpan = session.end - session.start
             val actualDuration = session.durationMs.coerceAtLeast(0L).coerceAtMost(wallSpan)
-            if (wallSpan <= 0L || actualDuration <= 0L) return@forEachIndexed
+            if (wallSpan <= 0L || actualDuration <= 0L) return@forEach
 
-            var cursor = session.start
-            var credited = 0L
-            while (cursor < session.end) {
-                val segmentEnd = minOf(
-                    session.end,
-                    cursor + SESSION_SEGMENT_MS,
-                    nextStratumBoundary(cursor, zone),
-                )
-                if (segmentEnd <= cursor) break
+            // Binary-search the first observation whose end is after this session starts.
+            var low = 0
+            var high = observations.size
+            while (low < high) {
+                val middle = (low + high) ushr 1
+                if (observations[middle].end <= session.start) low = middle + 1 else high = middle
+            }
 
-                val wallDuration = segmentEnd - cursor
-                val useMs =
-                    if (segmentEnd == session.end) {
-                        actualDuration - credited
-                    } else {
-                        actualDuration * wallDuration / wallSpan
-                    }
-                credited += useMs
-                if (useMs > 0L) {
-                    val midpoint = cursor + wallDuration / 2L
-                    val sample =
-                        sampleIndex.nearest(midpoint, MAX_CONTEXT_DISTANCE_MS)
-                            ?.takeIf { it.isScreenOn }
-                    if (sample != null) {
-                        val states = statesFor(
-                            sample,
-                            spanIndex.tagsAt(midpoint),
-                            includeHeadphones,
-                            includeVehicle,
-                            gyroMedian,
-                        )
-                        val stratum = stratumAt(midpoint, zone)
-                        val day = TimeUtil.dateOf(midpoint, zone)
-                        states.forEach { state ->
-                            val key = UseKey(session.appName, state.dimension, state.phrase, stratum)
+            var index = low
+            while (index < observations.size && observations[index].start < session.end) {
+                val observation = observations[index]
+                val overlapMs = (minOf(session.end, observation.end) -
+                    maxOf(session.start, observation.start)).coerceAtLeast(0L)
+                if (overlapMs > 0L) {
+                    val useMs = if (overlapMs == wallSpan) actualDuration
+                    else actualDuration * overlapMs / wallSpan
+                    if (useMs > 0L) {
+                        observation.states.forEach { state ->
+                            val key = UseKey(session.appName, state.dimension, state.phrase, observation.stratum)
                             val accumulator = use.getOrPut(key) { UseAccumulator() }
                             accumulator.durationMs += useMs
                             accumulator.sessionIds += sessionId
-                            accumulator.days += day
+                            accumulator.days += observation.day
                         }
                     }
                 }
-                cursor = segmentEnd
+                index++
             }
         }
-
         return buildRelationships(exposure, use)
     }
 
-    private fun addExposureWindow(
-        sample: ContextSample,
-        start: Long,
-        end: Long,
+    private fun buildObservations(
+        samples: List<ContextSample>,
         zone: ZoneId,
-        spanIndex: SpanIndex,
-        includeHeadphones: Boolean,
-        includeVehicle: Boolean,
         gyroMedian: Float?,
-        situationBoundaries: List<Long>,
-        exposure: MutableMap<ExposureKey, ExposureAccumulator>,
-    ) {
-        var cursor = start
-        while (cursor < end) {
-            val nextEventBoundary = situationBoundaries.firstOrNull { it > cursor } ?: end
-            val pieceEnd = minOf(end, nextStratumBoundary(cursor, zone), nextEventBoundary)
-            if (pieceEnd <= cursor) break
-
-            val midpoint = cursor + (pieceEnd - cursor) / 2L
-            val states = statesFor(
-                sample,
-                spanIndex.tagsAt(midpoint),
-                includeHeadphones,
-                includeVehicle,
-                gyroMedian,
-            )
-            val stratum = stratumAt(midpoint, zone)
-            val day = TimeUtil.dateOf(midpoint, zone)
-            states.forEach { state ->
-                val key = ExposureKey(state.dimension, state.phrase, stratum)
-                val accumulator = exposure.getOrPut(key) { ExposureAccumulator() }
-                accumulator.durationMs += pieceEnd - cursor
-                accumulator.days += day
+    ): List<Observation> {
+        val observations = mutableListOf<Observation>()
+        for (i in 0 until samples.lastIndex) {
+            val sample = samples[i]
+            val gap = samples[i + 1].timestamp - sample.timestamp
+            if (!sample.isScreenOn || gap <= 0L || gap > MAX_OBSERVATION_GAP_MS) continue
+            val windowEnd = sample.timestamp + minOf(gap, MAX_EXPOSURE_HOLD_MS)
+            var cursor = sample.timestamp
+            while (cursor < windowEnd) {
+                val segmentEnd = minOf(windowEnd, cursor + SESSION_SEGMENT_MS, nextStratumBoundary(cursor, zone))
+                if (segmentEnd <= cursor) break
+                val midpoint = cursor + (segmentEnd - cursor) / 2L
+                observations += Observation(
+                    start = cursor,
+                    end = segmentEnd,
+                    stratum = stratumAt(midpoint, zone),
+                    day = TimeUtil.dateOf(midpoint, zone),
+                    states = statesFor(sample, gyroMedian),
+                )
+                cursor = segmentEnd
             }
-            cursor = pieceEnd
         }
+        return observations
     }
 
-    private fun statesFor(
-        sample: ContextSample,
-        tags: Set<String>,
-        includeHeadphones: Boolean,
-        includeVehicle: Boolean,
-        gyroMedian: Float?,
-    ): List<State> {
+    private fun statesFor(sample: ContextSample, gyroMedian: Float?): List<State> {
         val out = mutableListOf<State>()
-
         when (ContextLabels.light(sample.lightLux)) {
             Light.DARK -> out += State(ContextDimension.LIGHT, "ambient light is dark")
             Light.DIM -> out += State(ContextDimension.LIGHT, "ambient light is dim")
             Light.BRIGHT -> out += State(ContextDimension.LIGHT, "ambient light is bright")
             null -> Unit
         }
-
         when (ContextLabels.motion(sample)) {
             Motion.STILL -> out += State(ContextDimension.PHONE_MOTION, "the phone is still")
             Motion.MOVING -> out += State(ContextDimension.PHONE_MOTION, "the phone is moving")
             Motion.ACTIVE -> out += State(ContextDimension.PHONE_MOTION, "the phone is highly active")
             null -> Unit
         }
-
         if (gyroMedian != null) {
             val variance = sample.gyroVariance
             if (variance != null && variance.isFinite() && variance >= 0f) {
-                val phrase =
-                    if (variance >= gyroMedian) {
-                        "the phone is rotating more than your usual level"
-                    } else {
-                        "the phone is rotating less than your usual level"
-                    }
+                val phrase = if (variance >= gyroMedian) {
+                    "the phone is rotating more than your usual level"
+                } else {
+                    "the phone is rotating less than your usual level"
+                }
                 out += State(ContextDimension.PHONE_ROTATION, phrase)
             }
         }
-
+        // This boolean is collected in each snapshot, so both charging states are directly observed.
         out += State(
             ContextDimension.CHARGING,
             if (sample.isCharging) "the phone is charging" else "the phone is unplugged",
         )
-
-        if (includeHeadphones) {
-            out += State(
-                ContextDimension.HEADPHONES,
-                if (SpanIndex.HEADPHONES in tags) "headphones are connected" else "headphones are disconnected",
-            )
-        }
-        if (includeVehicle) {
-            out += State(
-                ContextDimension.VEHICLE,
-                if (SpanIndex.VEHICLE in tags) {
-                    "activity recognition reports a vehicle"
-                } else {
-                    "activity recognition does not report a vehicle"
-                },
-            )
-        }
-
         sample.powerSave?.let { enabled ->
-            out += State(
-                ContextDimension.POWER_SAVER,
-                if (enabled) "battery saver is on" else "battery saver is off",
-            )
+            out += State(ContextDimension.POWER_SAVER, if (enabled) "battery saver is on" else "battery saver is off")
         }
         sample.thermalStatus?.takeIf { it in 0..6 }?.let { status ->
             out += State(
@@ -336,7 +236,6 @@ object ContextualBehaviorAnalyzer {
                 if (status >= 3) "device thermal status is elevated" else "device thermal status is normal",
             )
         }
-
         return out
     }
 
@@ -344,64 +243,68 @@ object ContextualBehaviorAnalyzer {
         exposure: Map<ExposureKey, ExposureAccumulator>,
         use: Map<UseKey, UseAccumulator>,
     ): List<ContextRelationship> {
-        val groups =
-            use.keys.map { GroupKey(it.appName, it.dimension, it.phrase) }.distinct()
+        val groups = use.keys.map { GroupKey(it.appName, it.dimension, it.phrase) }.distinct()
         val output = mutableListOf<ContextRelationship>()
 
         for (group in groups) {
-            val strata =
-                exposure.keys.asSequence()
-                    .filter { it.dimension == group.dimension && it.phrase == group.phrase }
-                    .map { it.stratum }
-                    .distinct()
-                    .toList()
+            val strata = exposure.keys.asSequence()
+                .filter { it.dimension == group.dimension && it.phrase == group.phrase }
+                .map { it.stratum }
+                .distinct()
+                .toList()
 
             var stateExposureMs = 0L
             var otherExposureMs = 0L
             var stateUseMs = 0L
             var otherUseMs = 0L
+            var commonWeightMs = 0L
+            var weightedStateRate = 0.0
+            var weightedOtherRate = 0.0
             var matchedStrata = 0
-            val stateExposureDays = mutableSetOf<java.time.LocalDate>()
-            val otherExposureDays = mutableSetOf<java.time.LocalDate>()
-            val stateUseDays = mutableSetOf<java.time.LocalDate>()
-            val otherUseDays = mutableSetOf<java.time.LocalDate>()
+            val stateExposureDays = mutableSetOf<LocalDate>()
+            val otherExposureDays = mutableSetOf<LocalDate>()
+            val stateUseDays = mutableSetOf<LocalDate>()
+            val otherUseDays = mutableSetOf<LocalDate>()
             val stateSessionIds = mutableSetOf<Int>()
             val otherSessionIds = mutableSetOf<Int>()
 
             for (stratum in strata) {
-                val stateExposure =
-                    exposure[ExposureKey(group.dimension, group.phrase, stratum)] ?: continue
-                val otherExposureEntries =
-                    exposure.filterKeys {
-                        it.dimension == group.dimension &&
-                            it.stratum == stratum &&
-                            it.phrase != group.phrase
-                    }
-                val otherStratumExposureMs = otherExposureEntries.values.sumOf { it.durationMs }
-                if (
-                    stateExposure.durationMs < MIN_STRATUM_EXPOSURE_MS ||
-                    otherStratumExposureMs < MIN_STRATUM_EXPOSURE_MS
-                ) {
-                    continue
+                val stateExposure = exposure[ExposureKey(group.dimension, group.phrase, stratum)] ?: continue
+                val otherEntries = exposure.filterKeys {
+                    it.dimension == group.dimension && it.stratum == stratum && it.phrase != group.phrase
                 }
+                val otherStratumExposureMs = otherEntries.values.sumOf { it.durationMs }
+                if (stateExposure.durationMs < MIN_STRATUM_EXPOSURE_MS ||
+                    otherStratumExposureMs < MIN_STRATUM_EXPOSURE_MS) continue
+
+                val stateUse = use[UseKey(group.appName, group.dimension, group.phrase, stratum)]
+                val otherUseEntries = otherEntries.keys.mapNotNull { key ->
+                    use[UseKey(group.appName, group.dimension, key.phrase, stratum)]
+                }
+                val stratumStateUseMs = stateUse?.durationMs ?: 0L
+                val stratumOtherUseMs = otherUseEntries.sumOf { it.durationMs }
+                val commonWeight = minOf(stateExposure.durationMs, otherStratumExposureMs)
+                if (commonWeight <= 0L) continue
 
                 matchedStrata++
                 stateExposureMs += stateExposure.durationMs
                 otherExposureMs += otherStratumExposureMs
+                commonWeightMs += commonWeight
+                // Identical stratum weights on both rates reduce exposure-mix confounding.
+                weightedStateRate += (stratumStateUseMs.toDouble() / stateExposure.durationMs) * commonWeight
+                weightedOtherRate += (stratumOtherUseMs.toDouble() / otherStratumExposureMs) * commonWeight
                 stateExposureDays += stateExposure.days
-                otherExposureEntries.values.forEach { otherExposureDays += it.days }
+                otherEntries.values.forEach { otherExposureDays += it.days }
 
-                use[UseKey(group.appName, group.dimension, group.phrase, stratum)]?.let { stateUse ->
+                if (stateUse != null) {
                     stateUseMs += stateUse.durationMs
                     stateSessionIds += stateUse.sessionIds
                     stateUseDays += stateUse.days
                 }
-                otherExposureEntries.keys.forEach { otherKey ->
-                    use[UseKey(group.appName, group.dimension, otherKey.phrase, stratum)]?.let { otherUse ->
-                        otherUseMs += otherUse.durationMs
-                        otherSessionIds += otherUse.sessionIds
-                        otherUseDays += otherUse.days
-                    }
+                otherUseEntries.forEach { otherUse ->
+                    otherUseMs += otherUse.durationMs
+                    otherSessionIds += otherUse.sessionIds
+                    otherUseDays += otherUse.days
                 }
             }
 
@@ -415,18 +318,17 @@ object ContextualBehaviorAnalyzer {
                 otherUseDays.size < MIN_USE_DAYS ||
                 stateSessionIds.size < MIN_SESSIONS_PER_GROUP ||
                 otherSessionIds.size < MIN_SESSIONS_PER_GROUP ||
-                stateSessionIds.size + otherSessionIds.size < MIN_TOTAL_SESSIONS ||
+                stateSessionIds.union(otherSessionIds).size < MIN_TOTAL_SESSIONS ||
                 stateUseMs < MIN_USE_PER_GROUP_MS ||
-                otherUseMs < MIN_USE_PER_GROUP_MS
-            ) {
-                continue
-            }
+                otherUseMs < MIN_USE_PER_GROUP_MS ||
+                commonWeightMs <= 0L
+            ) continue
 
-            val stateRate = stateUseMs.toDouble() / stateExposureMs
-            val otherRate = otherUseMs.toDouble() / otherExposureMs
+            val stateRate = weightedStateRate / commonWeightMs
+            val otherRate = weightedOtherRate / commonWeightMs
             if (stateRate <= 0.0 || otherRate <= 0.0) continue
             val ratio = stateRate / otherRate
-            if (ratio in 0.80..1.25) continue
+            if (!ratio.isFinite() || ratio in 0.80..1.25) continue
 
             output += ContextRelationship(
                 appName = group.appName,
@@ -444,7 +346,6 @@ object ContextualBehaviorAnalyzer {
                 matchedStrata = matchedStrata,
             )
         }
-
         return output.sortedWith(
             compareByDescending<ContextRelationship> { abs(ln(it.rateRatio)) }
                 .thenByDescending { it.sessionsInContext + it.sessionsOutsideContext },
@@ -453,21 +354,17 @@ object ContextualBehaviorAnalyzer {
 
     private fun stratumAt(time: Long, zone: ZoneId): Stratum {
         val local = Instant.ofEpochMilli(time).atZone(zone)
-        return Stratum(
-            weekend = TimeUtil.isWeekend(local.toLocalDate()),
-            threeHourBand = local.hour / 3,
-        )
+        return Stratum(TimeUtil.isWeekend(local.toLocalDate()), local.hour / 3)
     }
 
     private fun nextStratumBoundary(time: Long, zone: ZoneId): Long {
         val local = Instant.ofEpochMilli(time).atZone(zone)
         val nextHour = (local.hour / 3 + 1) * 3
-        val boundary =
-            if (nextHour >= 24) {
-                local.toLocalDate().plusDays(1).atStartOfDay(zone)
-            } else {
-                local.toLocalDate().atTime(nextHour, 0).atZone(zone)
-            }
+        val boundary = if (nextHour >= 24) {
+            local.toLocalDate().plusDays(1).atStartOfDay(zone)
+        } else {
+            local.toLocalDate().atTime(nextHour, 0).atZone(zone)
+        }
         return boundary.toInstant().toEpochMilli()
     }
 
@@ -475,10 +372,6 @@ object ContextualBehaviorAnalyzer {
         val sorted = values.filter { it.isFinite() && it >= 0f }.sorted()
         if (sorted.isEmpty()) return null
         val middle = sorted.size / 2
-        return if (sorted.size % 2 == 0) {
-            (sorted[middle - 1] + sorted[middle]) / 2f
-        } else {
-            sorted[middle]
-        }
+        return if (sorted.size % 2 == 0) (sorted[middle - 1] + sorted[middle]) / 2f else sorted[middle]
     }
 }
