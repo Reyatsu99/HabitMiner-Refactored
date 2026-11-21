@@ -238,7 +238,15 @@ class ScreenshotTest {
         shoot("13_app_detail", dark = false) {
             val pkg = data.state.appSummaries.first().packageName
             val detail = UsageSummaries.detail(data.sessions.filter { it.packageName == pkg }, emptyList(), java.time.LocalDate.of(2026, 10, 3), SampleData.zone)
-            val hook = com.habitminer.analytics.PatternFinder.hook(pkg, data.sessions, emptyList(), data.unlocks, SampleData.zone)
+            // Illustrative: the sample week is too regular for these shares to look like a real person's.
+            val hook =
+                com.habitminer.analytics.AppHook(
+                    days = 35, visits = 380, quickShare = 0.52f, quickPerDay = 8f, longPerDay = 2f, longTimeShare = 0.63f,
+                    longPeakHour = 0, longPeakShare = 0.45f,
+                    from = listOf("Snapchat" to 0.17f, "Telegram" to 0.14f, "WhatsApp" to 0.12f),
+                    afterNotificationShare = 0.14f, afterUnlockShare = 0.06f,
+                    next = listOf("Snapchat" to 0.16f, "WhatsApp" to 0.13f, "Telegram" to 0.10f),
+                )
             AppDetailContent(pkg, AppDetailState(loading = false, detail = detail, routines = listOf("Snapchat → Telegram"), hook = hook), onBack = {})
         }
 
