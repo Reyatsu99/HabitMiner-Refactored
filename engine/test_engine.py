@@ -96,6 +96,19 @@ def test_markov_model():
     assert predictions[0][0] == "PRODUCTIVITY"
 
 
+def test_markov_fit_replaces_old_state_and_uses_stable_ties():
+    model = TimeConditionedMarkovModel()
+    model.fit({"u1|WEEKDAY|MORNING": [["SOCIAL", "PRODUCTIVITY"]]})
+    model.fit({"u1|WEEKDAY|MORNING": [["SOCIAL", "GAMING"]]})
+
+    predictions = model.predict_next("SOCIAL", "WEEKDAY", "MORNING", top_k=2)
+    assert [state for state, _ in predictions] == ["GAMING", "SOCIAL"]
+    assert all(state != "PRODUCTIVITY" for state, _ in predictions)
+
+    with pytest.raises(ValueError, match="top_k must be at least 1"):
+        model.predict_next("SOCIAL", "WEEKDAY", "MORNING", top_k=0)
+
+
 def test_controlled_deviation_metrics_use_injected_day_bins():
     data = generate_synthetic_usage(num_users=1, num_days=28, seed=42)
     result = experiment3_deviation_detection(data)
