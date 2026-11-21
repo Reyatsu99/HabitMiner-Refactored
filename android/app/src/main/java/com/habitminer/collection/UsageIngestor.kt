@@ -68,8 +68,14 @@ class UsageIngestor
                             .coerceAtLeast(now - MAX_LOOKBACK_MS)
 
                     if (prefs.getInt(KEY_REPAIRED, 0) < REPAIR_VERSION) {
-                        runCatching { repairStoredLocked() }.onFailure { android.util.Log.w("HabitMiner", "Session repair failed", it) }
-                        prefs.edit().putInt(KEY_REPAIRED, REPAIR_VERSION).apply()
+                        try {
+                            repairStoredLocked()
+                            // Mark the migration complete only after every repair write succeeds.
+                            prefs.edit().putInt(KEY_REPAIRED, REPAIR_VERSION).apply()
+                        } catch (e: Exception) {
+                            // A transient database failure must not permanently skip the repair.
+                            android.util.Log.w("HabitMiner", "Session repair failed; it will be retried", e)
+                        }
                     }
 
                     val previous = contextRepository.getLastUsedNonLauncherPackage(appIdentityResolver.getLauncherPackages())
