@@ -10,7 +10,7 @@ This branch introduces a bounded, PrefixSpan-style sequential pattern miner for 
 
 - `android/app/src/main/java/com/habitminer/engine/SequentialPatternMiner.kt`
   - Adds the sequential pattern mining data structures and algorithm.
-  - Collapses adjacent sessions with the same package name.
+  - Collapses same-package sessions only when separated by at most five minutes; longer gaps remain separate visits.
   - Mines variable-length ordered subsequences, including patterns with intervening app events.
   - Counts support by distinct input sequence/day index.
   - Applies maximum pattern length and maximum transition-gap bounds.
@@ -31,7 +31,7 @@ Each daily input is represented by a `DailySequence` containing a day key and ti
 
 ### 2. Preprocessing
 
-Events are sorted by start time. Consecutive events with the same package name are currently merged into one event, with the merged end time set to the maximum end time.
+Events are grouped by unique day key, invalid intervals are discarded, and events are sorted by start time. Consecutive sessions with the same package are merged only when the gap is at most five minutes (matching the collector's continuity rule). Longer gaps remain separate visits, and overlapping events are not treated as sequential transitions.
 
 ### 3. Pattern expansion
 
@@ -76,19 +76,17 @@ CI success verifies the configured automated checks. It does not establish real-
 
 The following issues were identified in a subsequent source review and remain follow-up work unless separately fixed:
 
-1. **Duplicate day keys:** support uses distinct input day indices, not distinct `dayKey` values. Duplicate `DailySequence` entries for the same calendar day could inflate support. Normalize input to one sequence per day or count distinct day keys.
-2. **Aggressive adjacent-session merging:** any consecutive same-package events are merged, even when separated by a long idle interval. Add a continuity-gap rule so separate sessions are not joined.
-3. **Overlapping sessions:** transition validation does not explicitly define or reject overlapping events. Establish a normalization/overlap policy before mining.
+1. **Input identity:** duplicate `dayKey` entries are now coalesced before support is counted, so one calendar day contributes at most one unit of support.
+2. **Session continuity:** same-app visits merge only across gaps of at most five minutes; longer gaps are preserved as separate events.
+3. **Overlapping sessions:** invalid intervals are discarded and overlapping events are excluded as sequential transitions.
 4. **Projection growth:** recursive expansion can retain many projected positions, particularly when a pattern has repeated occurrences. Benchmark realistic large histories and consider projection deduplication and more efficient projected-database handling.
 5. **Context signals:** this implementation mines app sequences within day-type/time-slot bins. It does not yet incorporate accelerometer or ambient-light measurements into pattern discovery or validation.
 6. **Predictability metric:** the existing transition-entropy score is separate from this miner and measures transition concentration, not next-app prediction accuracy.
 
 ## Recommended next steps
 
-- Fix duplicate-day support accounting.
-- Prevent merging same-app sessions across long gaps.
-- Define and test overlapping-session handling.
-- Add tests for duplicate day keys, long same-app gaps, overlapping events, unsorted input, and invalid durations.
+- Keep the regression tests for duplicate day keys, long same-app gaps and overlapping events in the unit-test suite.
+- Benchmark runtime and memory against the previous habit-discovery implementation using identical usage histories.
 - Benchmark runtime and memory against the previous habit-discovery implementation using identical usage histories.
 - Add sensor-context validation as a separate stage after sequential pattern discovery.
 - Evaluate next-app prediction with held-out days and suitable prediction metrics if that feature is intended to represent predictive accuracy.
