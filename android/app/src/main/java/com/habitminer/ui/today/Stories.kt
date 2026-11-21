@@ -198,7 +198,7 @@ fun StoryPage(
                 Text(slide.kicker, style = MaterialTheme.typography.titleSmall, color = Color.White.copy(alpha = 0.9f), modifier = Modifier.weight(1f))
                 IconButton(onClick = onClose) { Icon(Icons.Rounded.Close, contentDescription = "Close", tint = Color.White) }
             }
-            Spacer(Modifier.weight(0.6f))
+            Spacer(Modifier.height(56.dp))
             Text(slide.headline, style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.SemiBold), color = Color.White)
             Spacer(Modifier.height(18.dp))
             Text(slide.meaning, style = MaterialTheme.typography.bodyLarge, color = Color.White.copy(alpha = 0.92f))
