@@ -38,7 +38,7 @@ class SequentialPatternMinerTest {
     fun countsSupportByDistinctDayNotRepeatedOccurrences() {
         val days = (0 until 4).map { index ->
             day(index, "A" to 0, "B" to 2, "A" to 20, "B" to 22, "A" to 40, "B" to 42)
-        }
+        } + day(4, "C" to 0)
 
         assertTrue(SequentialPatternMiner.mine(days).isEmpty())
     }
