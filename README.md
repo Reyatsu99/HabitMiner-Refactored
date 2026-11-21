@@ -5,7 +5,7 @@
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.3-purple.svg)](https://kotlinlang.org/)
 [![Android](https://img.shields.io/badge/Android-8.0%2B-green.svg)](https://developer.android.com/)
-[![Version](https://img.shields.io/badge/Version-2.2-blue.svg)](#-whats-new-in-extended)
+[![Version](https://img.shields.io/badge/Version-2.4.0--dev-blue.svg)](#-whats-new-in-extended)
 
 HabitMiner Extended is the next version of [HabitMiner](docs/archive/README_OLD.md). It installs as its own app (**HM Extended**, `com.habitminer.extended`) next to the original, can bring the original's history across, and adds a redesigned interface, better sleep and nap tracking, goals, a long list of accuracy fixes found by using it every day, shorter daily loops (2.1), and (in 2.2) **patterns**: what pulls you into your phone, what it costs you, and whether your changes are working.
 
