@@ -8,26 +8,44 @@ from deviation_detector import detect_deviations, inject_controlled_deviation
 from markov_model import TimeConditionedMarkovModel
 
 def split_data_chronologically(df: pd.DataFrame, train_ratio: float = 0.7) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Split by complete calendar days so a user's day never leaks across train and test."""
+    if not 0.0 < train_ratio < 1.0:
+        raise ValueError("train_ratio must be between 0 and 1")
     if df.empty:
-        return df, df
-        
-    df_sorted = df.sort_values(["user_id", "start_time"])
+        return df.copy(), df.copy()
+    required = {"user_id", "start_time"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"usage data is missing required columns: {sorted(missing)}")
+
+    df_sorted = df.copy()
+    df_sorted["start_time"] = pd.to_datetime(df_sorted["start_time"], errors="coerce")
+    df_sorted = df_sorted.dropna(subset=["start_time"]).sort_values(["user_id", "start_time"])
     train_dfs = []
     test_dfs = []
-    
-    for uid, group in df_sorted.groupby("user_id"):
-        split_idx = int(len(group) * train_ratio)
-        train_dfs.append(group.iloc[:split_idx])
-        test_dfs.append(group.iloc[split_idx:])
-        
-    return pd.concat(train_dfs), pd.concat(test_dfs)
+
+    for _, group in df_sorted.groupby("user_id", sort=False):
+        days = sorted(group["start_time"].dt.date.unique())
+        if len(days) < 2:
+            # A single-day user cannot provide a leakage-free holdout.
+            train_dfs.append(group)
+            continue
+        split_idx = min(max(int(len(days) * train_ratio), 1), len(days) - 1)
+        train_days = set(days[:split_idx])
+        day_values = group["start_time"].dt.date
+        train_dfs.append(group.loc[day_values.isin(train_days)])
+        test_dfs.append(group.loc[~day_values.isin(train_days)])
+
+    train = pd.concat(train_dfs, ignore_index=True) if train_dfs else df_sorted.iloc[0:0].copy()
+    test = pd.concat(test_dfs, ignore_index=True) if test_dfs else df_sorted.iloc[0:0].copy()
+    return train, test
 
 def experiment1_habit_discovery(usage_df: pd.DataFrame, user_id: str = None) -> dict:
     """Experiment 1: Habit Discovery"""
     if user_id:
         usage_df = usage_df[usage_df["user_id"] == user_id]
         
-    train_df, test_df = split_data_chronologically(usage_df)
+    train_df, _ = split_data_chronologically(usage_df)
     
     train_seqs = extract_sequences(train_df)
     habits = mine_frequent_sequences(train_seqs, min_support=2, min_confidence=0.3)
