@@ -122,6 +122,8 @@ private fun storyPalette(kind: StoryCard.Kind): Triple<androidx.compose.ui.graph
         StoryCard.Kind.CHANGE -> Triple(c(0xFFC2410C), c(0xFFF59E0B), white)
         StoryCard.Kind.SLEEP -> Triple(c(0xFF3730A3), c(0xFF8B5CF6), white)
         StoryCard.Kind.MILESTONES -> Triple(c(0xFFEAB308), c(0xFFFDE047), c(0xFF1F1A00))
+        StoryCard.Kind.PATTERN -> Triple(c(0xFF0E7490), c(0xFF22D3EE), white)
+        StoryCard.Kind.GOALS -> Triple(c(0xFF15803D), c(0xFF4ADE80), white)
         StoryCard.Kind.EXPERIMENT -> Triple(c(0xFF7E22CE), c(0xFFD946EF), white)
     }
 }

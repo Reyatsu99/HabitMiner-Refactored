@@ -123,6 +123,7 @@ class InsightsComputer
         private val calendarBusy: com.habitminer.sources.CalendarBusy,
         private val insightRepository: com.habitminer.repository.InsightRepository,
         private val goalsStore: com.habitminer.goals.GoalsStore,
+        private val patternPrefs: com.habitminer.repository.PatternPrefs,
     ) {
         suspend fun compute(
             allUsage: List<AppUsageEntity>,
@@ -252,7 +253,9 @@ class InsightsComputer
 
             val patterns =
                 runCatching {
+                    val hidden = patternPrefs.hidden.value
                     com.habitminer.analytics.PatternFinder.find(sessions, notificationEvents, unlocks, routine.nights, today, now, zone)
+                        .filterNot { it.key in hidden }
                 }.getOrDefault(emptyList())
             // Use less apps: pauses answered and time against before.
             val goals = goalsStore.goals.value
@@ -267,10 +270,18 @@ class InsightsComputer
                                 val focus = DeviceEvents.detailValue(e.detail, "focus") == "true"
                                 if (focus) null else Triple(pkg, e.timestamp, DeviceEvents.detailValue(e.detail, "outcome") ?: "")
                             }
+                        // Every day with any data counts (as 0 for an app), so quiet days aren't lost.
+                        val dataDays = sessions.map { TimeUtil.dateOf(it.start, zone) }.toSet()
+                        val leisure =
+                            sessions.filter { it.category.isLeisure }.groupBy { it.packageName }.mapValues { (_, l) ->
+                                val m = HashMap<java.time.LocalDate, Long>()
+                                dataDays.forEach { m[it] = 0L }
+                                l.forEach { m.merge(TimeUtil.dateOf(it.start, zone), it.durationMs, Long::plus) }
+                                l.first().appName to m
+                            }
                         goals.since.mapValues { (pkg, since) ->
                             val daily = HashMap<java.time.LocalDate, Long>()
-                            // Every day with any data counts (as 0 for this app), so quiet days aren't lost.
-                            sessions.forEach { daily.putIfAbsent(TimeUtil.dateOf(it.start, zone), 0L) }
+                            dataDays.forEach { daily[it] = 0L }
                             sessions.filter { it.packageName == pkg }.forEach { daily.merge(TimeUtil.dateOf(it.start, zone), it.durationMs, Long::plus) }
                             com.habitminer.analytics.PatternFinder.impact(
                                 pkg,
@@ -279,6 +290,9 @@ class InsightsComputer
                                 daily,
                                 today,
                                 zone,
+                                // Other Use less apps are being cut too, so they don't count as where the time went.
+                                otherLeisure =
+                                    leisure.filterKeys { it != pkg && it !in goals.useLess }.values.associate { it },
                             )
                         }
                     }

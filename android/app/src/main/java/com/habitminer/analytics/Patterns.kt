@@ -17,6 +17,9 @@ enum class PatternAction {
     /** Open Android's notification settings for the app. */
     APP_NOTIFICATIONS,
     OPEN_SLEEP,
+
+    /** Pause each of [Pattern.apps] from [Pattern.nightFromMinute] until 05:00. */
+    PAUSE_APPS_AT_NIGHT,
 }
 
 enum class PatternKind {
@@ -53,7 +56,19 @@ data class Pattern(
     val strength: Float = 0.5f,
     /** A good thing (a win), shown in a friendlier colour. */
     val good: Boolean = false,
-)
+    /** For [PatternAction.PAUSE_APPS_AT_NIGHT]: (package, name) of the apps, most first. */
+    val apps: List<Pair<String, String>> = emptyList(),
+) {
+    /** A few words for the home-screen widget, for the patterns that change day to day. */
+    val widgetLine: String?
+        get() =
+            when (kind) {
+                PatternKind.LATE_FREE_RUN -> title.replace("without a long session after midnight", "without a late session")
+                PatternKind.WEEK_CHANGE -> title.removePrefix("This week: ").replace(" than the week before", " than last week")
+                PatternKind.APP_WEEK_CHANGE -> title
+                else -> null
+            }
+}
 
 /** One app's habit: how you get there, how long you stay, and where you go next. */
 data class AppHook(
@@ -90,6 +105,14 @@ data class GoalImpact(
     /** Daily time since (full days), and on usual days in the four weeks before. */
     val afterPerDayMs: Long?,
     val beforePerDayMs: Long?,
+    /**
+     * Your other leisure apps (social, video, games) since against before, per day; and the one
+     * that went up most. Only set when this app went down and they clearly went up.
+     */
+    val spilloverMs: Long? = null,
+    val spilloverApp: Pair<String, Long>? = null,
+    /** This app down by 10+ min a day and other leisure apps not up by 10+: a real saving. */
+    val noSpillover: Boolean = false,
 ) {
     val tooEarly: Boolean get() = days < PatternFinder.IMPACT_MIN_DAYS
 
@@ -110,7 +133,31 @@ data class GoalImpact(
                 }
         }
         if (parts.isEmpty()) return "No pauses yet."
-        return parts.joinToString("; ").replaceFirstChar { it.uppercase() } + "."
+        var out = parts.joinToString("; ").replaceFirstChar { it.uppercase() } + "."
+        if (!tooEarly) {
+            spilloverMs?.let { sp ->
+                out += " But your other leisure apps went up ${Format.duration(sp)} a day" +
+                    (spilloverApp?.let { (n, ms) -> ", mostly $n (+${Format.duration(ms)})" } ?: "") + "."
+            }
+            if (noSpillover) out += " Your other leisure apps didn't make up for it."
+        }
+        return out
+    }
+
+    /**
+     * When the pause isn't doing much after the first days: you mostly open the app anyway and
+     * its time hasn't dropped. Null when it's working, or too early to say.
+     */
+    fun suggestion(nightOnly: Boolean): String? {
+        if (tooEarly || pauses < 10) return null
+        val closeRate = closed.toFloat() / pauses
+        val dropped = afterPerDayMs != null && beforePerDayMs != null && afterPerDayMs < beforePerDayMs * 0.9
+        if (closeRate >= 0.2f || dropped) return null
+        return if (nightOnly) {
+            "You open it anyway at most pauses, even at night. A pause may not be the right tool for this app; a daily reminder in Remind me might suit it better."
+        } else {
+            "You open it anyway at most pauses. Try pausing it only at night, when long sessions do the most harm: add it again from its card in Your patterns or its app page."
+        }
     }
 }
 
@@ -178,7 +225,7 @@ object PatternFinder {
         val days = recent.map { TimeUtil.dateOf(it.start, zone) }.distinct().size
         val out = mutableListOf<Pattern>()
         runCatching { out += longSessions(visits, days, today, zone) }
-        runCatching { lateWeekdaySleep(nights, zone)?.let { out += it } }
+        runCatching { lateWeekdaySleep(nights, visits, zone)?.let { out += it } }
         runCatching { out += weekChanges(visits, today, zone) }
         runCatching { out += notificationPull(visits, notifications.filter { it.time >= from }) }
         runCatching { out += leadIns(visits) }
@@ -237,6 +284,7 @@ object PatternFinder {
 
     private fun lateWeekdaySleep(
         nights: List<SleepEstimate>,
+        visits: List<Visit>,
         zone: ZoneId,
     ): Pattern? {
         // Nights before a weekday morning: weekends you sleep in and make up for it.
@@ -255,6 +303,7 @@ object PatternFinder {
         val wakeEarly = med(early.map { TimeUtil.minuteOfDay(it.wakeTime, zone).toLong() })
         val wakeLate = med(late.map { TimeUtil.minuteOfDay(it.wakeTime, zone).toLong() })
         val wakeShift = (wakeLate - wakeEarly).coerceAtLeast(0)
+        val culprits = lateApps(visits, zone)
         return Pattern(
             kind = PatternKind.LATE_WEEKDAY_SLEEP,
             key = "LATE_SLEEP",
@@ -262,11 +311,49 @@ object PatternFinder {
             detail =
                 "On weekday nights you fell asleep after about ${Format.clockFromMinutes(median)}, you slept ${Format.duration(sleepLate)} instead of " +
                     "${Format.duration(sleepEarly)}" +
-                    if (wakeShift >= 10) ": you woke only ${Format.duration(wakeShift * TimeUtil.MINUTE)} later." else ": you woke at about the same time.",
-            action = PatternAction.OPEN_SLEEP,
+                    (if (wakeShift >= 10) ": you woke ${Format.duration(wakeShift * TimeUtil.MINUTE)} later." else ": you woke at about the same time.") +
+                    (if (culprits.isNotEmpty()) " Most of your long sessions after 23:00 are in ${names(culprits.map { it.second })}." else ""),
+            action = if (culprits.isNotEmpty()) PatternAction.PAUSE_APPS_AT_NIGHT else PatternAction.OPEN_SLEEP,
+            nightFromMinute = if (culprits.isNotEmpty()) 23 * 60 else null,
+            apps = culprits,
             strength = (0.6f + cost.toFloat() / (4 * TimeUtil.HOUR)).coerceAtMost(1f),
         )
     }
+
+    /** Categories you'd rarely want paused at night: work, maps, music, tools, health. */
+    private val NOT_PAUSED_AT_NIGHT =
+        setOf(AppCategory.PRODUCTIVITY, AppCategory.NAVIGATION, AppCategory.MUSIC, AppCategory.TOOLS, AppCategory.HEALTH)
+
+    /**
+     * The (up to three) apps behind your long late sessions: 15+ minutes starting after 23:00 or
+     * before 05:00, or running past midnight (a 23:40 start that goes on to 01:00 counts).
+     */
+    private fun lateApps(
+        visits: List<Visit>,
+        zone: ZoneId,
+    ): List<Pair<String, String>> {
+        val late =
+            visits.filter { v ->
+                if (v.ms < LONG_MS || v.category in NOT_PAUSED_AT_NIGHT) return@filter false
+                val h = TimeUtil.zoned(v.start, zone).hour
+                h >= 23 || h < 5 || TimeUtil.dateOf(v.end, zone) != TimeUtil.dateOf(v.start, zone)
+            }
+        return late.groupBy { it.packageName }
+            .filterValues { it.size >= 3 }
+            .entries.sortedByDescending { e -> e.value.sumOf { it.ms } }
+            .take(3)
+            .map { it.key to it.value.first().appName }
+    }
+
+    private fun names(n: List<String>): String =
+        when (n.size) {
+            0 -> ""
+            1 -> n[0]
+            else -> n.dropLast(1).joinToString(", ") + " and " + n.last()
+        }
+
+    /** "YouTube and Evony", for buttons. */
+    fun appNames(apps: List<Pair<String, String>>): String = names(apps.map { it.second })
 
     // ---- This week against the week before ----------------------------------------------
 
@@ -461,7 +548,7 @@ object PatternFinder {
         days: Int,
         zone: ZoneId,
     ): Pattern? {
-        if (days < 7) return null
+        if (days < 4) return null
         val quick = visits.filter { it.ms < QUICK_MS }
         val perHour = DoubleArray(24)
         for (v in quick) {
@@ -575,6 +662,19 @@ object PatternFinder {
         return out
     }
 
+    // ---- Still to come, for new users ---------------------------------------------------
+
+    /** Patterns that need more days than you have yet, and roughly when they can show. */
+    fun upcoming(daysOfData: Int): List<String> {
+        fun more(n: Int) = (n - daysOfData).let { if (it == 1) "1 more day" else "$it more days" }
+        val out = mutableListOf<String>()
+        if (daysOfData < 4) out += "Checking all day: in ${more(4)}"
+        if (daysOfData < 7) out += "Long sessions, notifications that pull you in, and your mornings: in ${more(7)}"
+        if (daysOfData < 14) out += "This week against the week before: in ${more(14)}"
+        if (daysOfData < 21) out += "Late weekday nights and sleep: once there are 10 weekday nights, about ${if (daysOfData < 7) "3" else "2"} weeks in"
+        return out
+    }
+
     // ---- App detail: how an app hooks you -------------------------------------------------
 
     fun hook(
@@ -638,6 +738,8 @@ object PatternFinder {
         daily: Map<LocalDate, Long>,
         today: LocalDate,
         zone: ZoneId,
+        /** Your other leisure apps' time per day, by app name (this one left out). */
+        otherLeisure: Map<String, Map<LocalDate, Long>> = emptyMap(),
     ): GoalImpact {
         val start = TimeUtil.dateOf(since, zone)
         // Full days after the day it was set, up to yesterday.
@@ -647,6 +749,27 @@ object PatternFinder {
         val before = (2L..29L).map { start.minusDays(it) }.filter { daily.containsKey(it) }
         val usual = before.map { daily[it] ?: 0L }.sorted().let { if (it.size >= 7) it[it.size / 2] else null }
         val mine = pauses.filter { it.first >= since }
+        val afterMs = after.takeIf { it.isNotEmpty() }?.map { daily[it] ?: 0L }?.sorted()?.let { it[it.size / 2] }
+        // Did the time just move to other leisure apps? Means over the same days, and only
+        // clear changes (10+ min a day both ways), so ordinary noise doesn't read as a shift.
+        var spill: Long? = null
+        var spillApp: Pair<String, Long>? = null
+        var noSpill = false
+        val down = if (afterMs != null && usual != null) usual - afterMs else 0L
+        if (after.size >= IMPACT_MIN_DAYS && before.size >= 7 && down >= 10 * TimeUtil.MINUTE && otherLeisure.isNotEmpty()) {
+            fun mean(
+                m: Map<LocalDate, Long>,
+                ds: List<LocalDate>,
+            ) = ds.sumOf { m[it] ?: 0L } / ds.size
+            val change = otherLeisure.mapValues { (_, m) -> mean(m, after) - mean(m, before) }
+            val total = change.values.sum()
+            if (total >= 10 * TimeUtil.MINUTE) {
+                spill = total
+                spillApp = change.entries.maxByOrNull { it.value }?.takeIf { it.value >= 5 * TimeUtil.MINUTE }?.let { it.key to it.value }
+            } else if (total < 10 * TimeUtil.MINUTE) {
+                noSpill = true
+            }
+        }
         return GoalImpact(
             packageName = packageName,
             since = since,
@@ -654,8 +777,11 @@ object PatternFinder {
             pauses = mine.size,
             closed = mine.count { it.second == "left" },
             openedAnyway = mine.count { it.second == "opened" },
-            afterPerDayMs = after.takeIf { it.isNotEmpty() }?.map { daily[it] ?: 0L }?.sorted()?.let { it[it.size / 2] },
+            afterPerDayMs = afterMs,
             beforePerDayMs = usual,
+            spilloverMs = spill,
+            spilloverApp = spillApp,
+            noSpillover = noSpill,
         )
     }
 

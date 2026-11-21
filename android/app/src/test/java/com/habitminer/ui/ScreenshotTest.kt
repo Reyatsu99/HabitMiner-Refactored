@@ -122,8 +122,9 @@ class ScreenshotTest {
             ),
             com.habitminer.analytics.Pattern(
                 com.habitminer.analytics.PatternKind.LATE_WEEKDAY_SLEEP, "LATE_SLEEP", "Late weekday nights cost you about 1h 24m of sleep",
-                "On weekday nights you fell asleep after about 03:20, you slept 6h 10m instead of 7h 34m: you woke only 24m later.",
-                action = com.habitminer.analytics.PatternAction.OPEN_SLEEP, strength = 0.9f,
+                "On weekday nights you fell asleep after about 03:20, you slept 6h 10m instead of 7h 34m: you woke 24m later. Most of your long sessions after 23:00 are in YT (drifty) and Snapchat.",
+                action = com.habitminer.analytics.PatternAction.PAUSE_APPS_AT_NIGHT, nightFromMinute = 23 * 60, strength = 0.9f,
+                apps = listOf("com.drifty.yt" to "YT (drifty)", "com.snapchat.android" to "Snapchat"),
             ),
             com.habitminer.analytics.Pattern(
                 com.habitminer.analytics.PatternKind.NOTIFICATION_PULL, "NOTE|com.topgames.evony", "Evony notifications often pull you in",
@@ -220,13 +221,21 @@ class ScreenshotTest {
                 onOpenApp = {},
                 today = java.time.LocalDate.of(2026, 10, 3),
                 impacts =
-                    apps.take(2).associate { a ->
+                    apps.take(2).mapIndexed { i, a ->
                         a.packageName to
-                            com.habitminer.analytics.GoalImpact(
-                                a.packageName, data.now - 8 * TimeUtil.DAY, days = 7, pauses = 23, closed = 15, openedAnyway = 7,
-                                afterPerDayMs = a.weekMs / 7 * 3 / 4, beforePerDayMs = a.weekMs / 7,
-                            )
-                    },
+                            if (i == 0) {
+                                com.habitminer.analytics.GoalImpact(
+                                    a.packageName, data.now - 8 * TimeUtil.DAY, days = 7, pauses = 23, closed = 15, openedAnyway = 7,
+                                    afterPerDayMs = a.weekMs / 7 * 3 / 4, beforePerDayMs = a.weekMs / 7,
+                                    spilloverMs = 24 * 60_000L, spilloverApp = "Snapchat" to 20 * 60_000L,
+                                )
+                            } else {
+                                com.habitminer.analytics.GoalImpact(
+                                    a.packageName, data.now - 8 * TimeUtil.DAY, days = 7, pauses = 21, closed = 2, openedAnyway = 19,
+                                    afterPerDayMs = a.weekMs / 7, beforePerDayMs = a.weekMs / 7,
+                                )
+                            }
+                    }.toMap(),
             )
         }
 
@@ -288,6 +297,15 @@ class ScreenshotTest {
                     today = java.time.LocalDate.of(2026, 10, 3),
                     now = data.now,
                     zone = SampleData.zone,
+                    found = samplePatterns(),
+                    goals =
+                        listOf(
+                            "Evony" to
+                                com.habitminer.analytics.GoalImpact(
+                                    "com.topgames.evony", data.now - 8 * TimeUtil.DAY, days = 7, pauses = 23, closed = 15, openedAnyway = 7,
+                                    afterPerDayMs = 104 * 60_000L, beforePerDayMs = 139 * 60_000L, noSpillover = true,
+                                ),
+                        ),
                 )
             com.habitminer.ui.story.StoryContent(com.habitminer.ui.story.StoryState(loading = false, story = story), onBack = {})
         }
@@ -307,6 +325,15 @@ class ScreenshotTest {
                     today = java.time.LocalDate.of(2026, 10, 3),
                     now = data.now,
                     zone = SampleData.zone,
+                    found = samplePatterns(),
+                    goals =
+                        listOf(
+                            "Evony" to
+                                com.habitminer.analytics.GoalImpact(
+                                    "com.topgames.evony", data.now - 8 * TimeUtil.DAY, days = 7, pauses = 23, closed = 15, openedAnyway = 7,
+                                    afterPerDayMs = 104 * 60_000L, beforePerDayMs = 139 * 60_000L, noSpillover = true,
+                                ),
+                        ),
                 )
             com.habitminer.ui.story.StoryContent(com.habitminer.ui.story.StoryState(loading = false, story = story), onBack = {})
         }

@@ -1715,5 +1715,50 @@ class PatternsTest {
         assertTrue(NightWindow.contains(30, 0))
         assertFalse(NightWindow.contains(23 * 60, 0))
     }
+
+    @Test
+    fun spilloverToOtherLeisureApps() {
+        val since = at(d(30), 12, 0)
+        val daily = HashMap<LocalDate, Long>()
+        val other = HashMap<LocalDate, Long>()
+        for (k in 2..29) {
+            daily[d(30).minusDays(k.toLong())] = 60 * MIN
+            other[d(30).minusDays(k.toLong())] = 30 * MIN
+        }
+        for (k in 1..6) {
+            daily[d(30).plusDays(k.toLong())] = 30 * MIN
+            other[d(30).plusDays(k.toLong())] = 55 * MIN
+        }
+        val moved = PatternFinder.impact("pkg.yt", since, emptyList(), daily, d(37), ZONE, mapOf("Game" to other))
+        assertNotNull(moved.spilloverMs)
+        assertTrue(moved.summary("YT"), moved.summary("YT").endsWith("But your other leisure apps went up 25m a day, mostly Game (+25m)."))
+        // Small changes elsewhere are noise, not a shift.
+        val flat = other.mapValues { (dd, v) -> if (dd.isAfter(d(30))) 35 * MIN else v }
+        val kept = PatternFinder.impact("pkg.yt", since, emptyList(), daily, d(37), ZONE, mapOf("Game" to flat))
+        assertNull(kept.spilloverMs)
+        assertTrue(kept.noSpillover)
+    }
+
+    @Test
+    fun suggestionWhenThePauseIsIgnored() {
+        val since = at(d(30), 12, 0)
+        val daily = HashMap<LocalDate, Long>()
+        for (k in 2..29) daily[d(30).minusDays(k.toLong())] = 60 * MIN
+        for (k in 1..6) daily[d(30).plusDays(k.toLong())] = 58 * MIN
+        val ignored = List(12) { (since + it * TimeUtil.HOUR) to if (it == 0) "left" else "opened" }
+        val im = PatternFinder.impact("pkg.yt", since, ignored, daily, d(37), ZONE)
+        assertTrue(im.suggestion(nightOnly = false)!!.contains("only at night"))
+        assertTrue(im.suggestion(nightOnly = true)!!.contains("may not be the right tool"))
+        val working = List(12) { (since + it * TimeUtil.HOUR) to "left" }
+        assertNull(PatternFinder.impact("pkg.yt", since, working, daily, d(37), ZONE).suggestion(false))
+    }
+
+    @Test
+    fun upcomingPatternsForNewUsers() {
+        assertEquals(4, PatternFinder.upcoming(2).size)
+        assertTrue(PatternFinder.upcoming(2).first().endsWith("in 2 more days"))
+        assertEquals(1, PatternFinder.upcoming(15).size)
+        assertTrue(PatternFinder.upcoming(30).isEmpty())
+    }
 }
 

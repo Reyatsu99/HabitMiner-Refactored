@@ -349,8 +349,10 @@ object DigestBuilder {
         days: Int,
         sleep: SleepSummary?,
         pickups: PickupStats?,
+        /** A line or two from your patterns and goals, put first. */
+        highlights: List<String> = emptyList(),
     ): Digest {
-        val lines = mutableListOf<String>()
+        val lines = highlights.toMutableList()
         val perDay = if (days > 0) thisWeekSessions.sumOf { it.durationMs } / days else 0L
         val title =
             if (week != null && kotlin.math.abs(week.deltaMs) >= 5 * TimeUtil.MINUTE) {

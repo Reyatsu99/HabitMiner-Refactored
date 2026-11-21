@@ -136,7 +136,7 @@ fun TrendsScreen(
                 item(key = "loading") { Skeleton() }
             } else {
                 when (tab) {
-                    TrendsTab.OVERVIEW -> overview(state, onOpenStory, onOpenSleep)
+                    TrendsTab.OVERVIEW -> overview(state, actions, onOpenStory, onOpenSleep)
                     TrendsTab.APPS -> apps(state, onOpenApp)
                     TrendsTab.ROUTINES -> routines(state)
                     TrendsTab.CHANGES -> changes(state, actions)
@@ -153,6 +153,7 @@ fun TrendsScreen(
 
 private fun LazyListScope.overview(
     state: HabitUiState,
+    actions: HabitActions,
     onOpenStory: () -> Unit,
     onOpenSleep: () -> Unit,
 ) {
@@ -167,16 +168,25 @@ private fun LazyListScope.overview(
                     "\"This week\" ones compare the last 7 days with the 7 before and change as you go.",
         )
     }
-    if (insights.patterns.isEmpty()) {
+    val upcoming = com.habitminer.analytics.PatternFinder.upcoming(state.daysOfData)
+    if (insights.patterns.isEmpty() && upcoming.isEmpty()) {
         item(key = "patterns-empty") {
-            Note("Nothing stands out clearly yet. Patterns appear once there's enough of your own data to be sure, usually within one to two weeks.")
+            Note("Nothing stands out clearly right now. Patterns show only when they clearly hold in your own data.")
         }
     } else {
         insights.patterns.forEach { p ->
             item(key = "pattern-${p.key}") {
-                com.habitminer.ui.design.PatternCard(p, onOpenSleep = onOpenSleep)
+                com.habitminer.ui.design.PatternCard(p, onOpenSleep = onOpenSleep, onHide = { intentional -> actions.hidePattern(p.key, intentional) })
                 Spacer(Modifier.height(10.dp))
             }
+        }
+    }
+    if (upcoming.isNotEmpty()) {
+        item(key = "patterns-upcoming") {
+            Note(
+                (if (insights.patterns.isEmpty()) "Still learning your days. " else "More to come. ") +
+                    upcoming.joinToString(". ") + ".",
+            )
         }
     }
     insights.week?.let { week ->

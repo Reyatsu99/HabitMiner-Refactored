@@ -103,6 +103,9 @@ class TodayWidget : GlanceAppWidget() {
                 data.phoneFreeMs?.takeIf { it >= 10 * 60_000L }?.let {
                     Text("${Format.duration(it)} phone-free", style = TextStyle(color = cyan, fontSize = 13.sp, fontWeight = FontWeight.Medium))
                 }
+                if (wide) {
+                    data.cue?.let { Text(it, style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = 12.sp), maxLines = 1) }
+                }
             }
         }
     }

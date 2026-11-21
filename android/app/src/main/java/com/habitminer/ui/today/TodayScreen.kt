@@ -328,7 +328,7 @@ fun TodayScreen(
                     )
                     pickPattern(insights?.patterns.orEmpty(), today)?.let { p ->
                         Spacer(Modifier.height(14.dp))
-                        PatternCard(p, raised = true, onOpenSleep = nav::openSleep)
+                        PatternCard(p, raised = true, onOpenSleep = nav::openSleep, onHide = { intentional -> actions.hidePattern(p.key, intentional) })
                         if ((insights?.patterns?.size ?: 0) > 1) {
                             TextButton(onClick = nav::openPatterns, modifier = Modifier.padding(horizontal = ScreenPadding)) {
                                 Text("All your patterns (${insights?.patterns?.size})", color = LocalDataColors.current.freeHue.text)

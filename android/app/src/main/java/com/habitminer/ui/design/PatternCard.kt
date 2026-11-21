@@ -5,7 +5,11 @@ package com.habitminer.ui.design
 import android.content.Intent
 import android.provider.Settings
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -22,10 +26,21 @@ import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.TrendingDown
 import androidx.compose.material.icons.rounded.TrendingUp
 import androidx.compose.material.icons.rounded.WbSunny
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -67,12 +82,40 @@ fun PatternCard(
     onOpenSleep: () -> Unit = {},
     /** Raised (Today) or in a list (Trends). */
     raised: Boolean = false,
+    /** Put it away: not useful, or (true) it's intentional. Null: no menu. */
+    onHide: ((intentional: Boolean) -> Unit)? = null,
 ) {
     val (label, hue, icon) = patternLook(pattern)
     val context = LocalContext.current
     val body: @Composable () -> Unit = {
-        Kicker(label, hue, icon)
-        Spacer(Modifier.height(6.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f)) { Kicker(label, hue, icon) }
+            if (onHide != null) {
+                var menu by remember { mutableStateOf(false) }
+                Box {
+                    IconButton(onClick = { menu = true }, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Rounded.MoreVert, contentDescription = "More for this pattern", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        DropdownMenuItem(
+                            text = { Text("That's intentional") },
+                            onClick = {
+                                menu = false
+                                onHide(true)
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Hide this pattern") },
+                            onClick = {
+                                menu = false
+                                onHide(false)
+                            },
+                        )
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(if (onHide != null) 2.dp else 6.dp))
         Text(pattern.title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
         Spacer(Modifier.height(4.dp))
         Text(pattern.detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -104,6 +147,32 @@ fun PatternCard(
                 }
             PatternAction.OPEN_SLEEP -> {
                 Spacer(Modifier.height(4.dp))
+                TextButton(onClick = onOpenSleep, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 0.dp)) {
+                    Text("See your nights", color = hue.text)
+                }
+            }
+            PatternAction.PAUSE_APPS_AT_NIGHT -> {
+                val guards = LocalAppGuards.current
+                val from = pattern.nightFromMinute ?: 23 * 60
+                if (guards != null && pattern.apps.isNotEmpty()) {
+                    Spacer(Modifier.height(10.dp))
+                    val names = com.habitminer.analytics.PatternFinder.appNames(pattern.apps)
+                    val allOn = pattern.apps.all { (pkg, _) -> pkg in guards.useLess && guards.pauseFrom[pkg] != null }
+                    if (allOn && guards.pauseWorks) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = LocalDataColors.current.goodHue.text, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Night pause on for $names", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f, fill = false))
+                            TextButton(onClick = guards.onOpenGoals) { Text("Edit", color = hue.text) }
+                        }
+                    } else {
+                        HueTonalButton(
+                            "Pause $names after ${com.habitminer.analytics.Format.clockFromMinutes(from)}",
+                            hue,
+                            { pattern.apps.forEach { (pkg, _) -> guards.onGuard(pkg, true, from) } },
+                        )
+                    }
+                }
                 TextButton(onClick = onOpenSleep, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 0.dp)) {
                     Text("See your nights", color = hue.text)
                 }

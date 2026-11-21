@@ -60,6 +60,11 @@ class StoryViewModel
                         today = today,
                         now = now,
                         zone = zone,
+                        found = bundle?.patterns.orEmpty(),
+                        goals =
+                            bundle?.impacts.orEmpty().map { (pkg, im) ->
+                                (sessions.firstOrNull { it.packageName == pkg }?.appName ?: appIdentityResolver.getAppName(pkg)) to im
+                            },
                     )
                 emit(StoryState(loading = false, story = story))
             }.flowOn(Dispatchers.Default)

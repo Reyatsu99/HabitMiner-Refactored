@@ -17,7 +17,7 @@ data class StoryCard(
     /** Optional per-day values for a small bar strip (Mon…Sun order of the week shown). */
     val bars: List<Pair<String, Long>> = emptyList(),
 ) {
-    enum class Kind { WEEK, PHONE_FREE, ROUTINE, CHANGE, SLEEP, MILESTONES, EXPERIMENT }
+    enum class Kind { WEEK, PHONE_FREE, ROUTINE, CHANGE, SLEEP, MILESTONES, PATTERN, GOALS, EXPERIMENT }
 }
 
 data class WeeklyStory(
@@ -45,6 +45,10 @@ object WeeklyStoryBuilder {
         today: LocalDate,
         now: Long,
         zone: ZoneId,
+        /** Your current patterns (already without the ones you hid), strongest first. */
+        found: List<Pattern> = emptyList(),
+        /** Each Use less app's name with how it's going. */
+        goals: List<Pair<String, GoalImpact>> = emptyList(),
     ): WeeklyStory? {
         // The last seven full days; from Sunday 18:00 the week includes that Sunday.
         val to = if (today.dayOfWeek == DayOfWeek.SUNDAY && TimeUtil.hourOf(now, zone) >= 18) today else today.minusDays(1)
@@ -159,7 +163,33 @@ object WeeklyStoryBuilder {
             cards += StoryCard(StoryCard.Kind.MILESTONES, "This week", milestones.first(), milestones.drop(1).joinToString(". ").let { if (it.isEmpty()) "" else "$it." })
         }
 
-        // 7. One small experiment, from the week's own data.
+        // 7. A win from last night or this week, else the strongest of your patterns.
+        val win = found.firstOrNull { it.kind == PatternKind.LATE_FREE_RUN }
+        val pick = win ?: found.firstOrNull { !it.fresh }
+        pick?.let { p ->
+            cards += StoryCard(StoryCard.Kind.PATTERN, if (win != null) "A good run" else "A pattern of yours", p.title, p.detail)
+        }
+
+        // 8. Is it working? Each Use less app since you added it.
+        if (goals.isNotEmpty()) {
+            val (name, first) = goals.first()
+            val headline =
+                when {
+                    first.tooEarly -> "Too early to tell"
+                    first.afterPerDayMs != null && first.beforePerDayMs != null && first.afterPerDayMs < first.beforePerDayMs - 5 * TimeUtil.MINUTE ->
+                        "$name: ${Format.duration(first.beforePerDayMs - first.afterPerDayMs)} less a day"
+                    else -> "$name: no change yet"
+                }
+            cards +=
+                StoryCard(
+                    StoryCard.Kind.GOALS,
+                    "Is it working?",
+                    headline,
+                    goals.joinToString(" ") { (n, im) -> im.summary(n) },
+                )
+        }
+
+        // 9. One small experiment, from the week's own data.
         cards += experiment(thisWeek, useLess, avg, zone)
 
         // Month heatmap: five full weeks ending this week, Monday first.

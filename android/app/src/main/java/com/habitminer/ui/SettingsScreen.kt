@@ -680,6 +680,20 @@ fun InsightsSection(
                 onClick = { pickingQuiet = true },
             )
         }
+        row {
+            ListRow(
+                "Hidden patterns",
+                supporting =
+                    if (state.hiddenPatterns == 0) {
+                        "None. Patterns you hide or mark as intentional (Trends) stop showing until you bring them back here."
+                    } else {
+                        "${state.hiddenPatterns} hidden or marked as intentional. Tap to show them again."
+                    },
+                maxSupportingLines = 3,
+                trailingText = if (state.hiddenPatterns > 0) "Show again" else null,
+                onClick = if (state.hiddenPatterns > 0) ({ viewModel.showHiddenPatterns() }) else null,
+            )
+        }
     }
     pickingQuiet?.let { start ->
         com.habitminer.ui.design.TimeDialog(

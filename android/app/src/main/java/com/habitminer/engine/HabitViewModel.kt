@@ -152,6 +152,8 @@ data class HabitUiState(
     val notificationAskDismissed: Boolean = false,
     /** Offer to put the Today widget on the home screen (once, after two days, if none is placed). */
     val widgetPrompt: Boolean = false,
+    /** Patterns you hid or marked as intentional (Settings can bring them back). */
+    val hiddenPatterns: Int = 0,
     /** Notification access was skipped during setup (it can be turned on later from Status). */
     val notificationAccessSkipped: Boolean = false,
     /** Show the "bring your HabitMiner history" card on Today. */
@@ -204,6 +206,7 @@ class HabitViewModel
         private val healthConnectSleep: com.habitminer.sources.HealthConnectSleep,
         private val calendarBusy: com.habitminer.sources.CalendarBusy,
         private val insightRepository: com.habitminer.repository.InsightRepository,
+        private val patternPrefs: com.habitminer.repository.PatternPrefs,
         private val recordingControl: com.habitminer.collection.RecordingControl,
         private val selfHealthRecorder: com.habitminer.collection.SelfHealthRecorder,
         private val updateChecker: com.habitminer.update.UpdateChecker,
@@ -328,6 +331,7 @@ class HabitViewModel
             }
             viewModelScope.launch(Dispatchers.IO) { syncHealthConnect(force = false) }
             viewModelScope.launch { refreshWidgetPrompt() }
+            _uiState.update { it.copy(hiddenPatterns = patternPrefs.hidden.value.size) }
         }
 
         /** Whether to offer the home-screen widget: supported, none placed yet, never answered. */
@@ -353,6 +357,28 @@ class HabitViewModel
                     androidx.glance.appwidget.GlanceAppWidgetManager(app).requestPinGlanceAppWidget(com.habitminer.widget.TodayWidgetReceiver::class.java)
                 }
             }
+        }
+
+        override fun hidePattern(
+            key: String,
+            intentional: Boolean,
+        ) {
+            patternPrefs.hide(key, if (intentional) com.habitminer.repository.PatternPrefs.INTENTIONAL else com.habitminer.repository.PatternPrefs.HIDDEN)
+            // Gone at once; the next analysis leaves it out too.
+            _uiState.update { s ->
+                s.copy(
+                    hiddenPatterns = patternPrefs.hidden.value.size,
+                    insights = s.insights?.let { b -> b.copy(patterns = b.patterns.filterNot { it.key == key }) },
+                )
+            }
+            analysisRepository.invalidate()
+        }
+
+        fun showHiddenPatterns() {
+            patternPrefs.showAll()
+            _uiState.update { it.copy(hiddenPatterns = 0) }
+            analysisRepository.invalidate()
+            insightsRefresh.tryEmit(Unit)
         }
 
         override fun dismissWidgetPrompt() {

@@ -85,6 +85,12 @@ interface HabitActions {
     /** "Not now" on the widget card. */
     fun dismissWidgetPrompt() = Unit
 
+    /** Put a pattern away: not useful, or [intentional] (you know, and it's fine). */
+    fun hidePattern(
+        key: String,
+        intentional: Boolean,
+    ) = Unit
+
     fun dismissWelcomeBack() = Unit
 
     fun downloadUpdate() = Unit

@@ -125,7 +125,7 @@ fun GoalsScreen(
             if (goals.useLess.isEmpty()) {
                 Note("Pick apps you'd like to spend less time in. You'll see how this week compares with last week.")
             } else {
-                AppGoalRows(goals.useLess, byPackage, less = true, today = today, impacts = impacts, onOpenApp = onOpenApp)
+                AppGoalRows(goals.useLess, byPackage, less = true, today = today, impacts = impacts, nightOnly = goals.pauseFrom.keys, onOpenApp = onOpenApp)
             }
         }
 
@@ -303,6 +303,8 @@ private fun AppGoalRows(
     today: LocalDate,
     onOpenApp: (String) -> Unit,
     impacts: Map<String, com.habitminer.analytics.GoalImpact> = emptyMap(),
+    /** Apps paused only at night. */
+    nightOnly: Set<String> = emptySet(),
 ) {
     RowGroup {
         packages.forEach { pkg ->
@@ -345,6 +347,14 @@ private fun AppGoalRows(
                                     im.summary(a?.appName ?: "it").replaceFirstChar { it.lowercase() },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        im.suggestion(pkg in nightOnly)?.let { tip ->
+                            Text(
+                                tip,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = LocalDataColors.current.stepsHue.text,
+                                modifier = Modifier.padding(start = 90.dp, end = 16.dp, bottom = 14.dp),
                             )
                         }
                     }

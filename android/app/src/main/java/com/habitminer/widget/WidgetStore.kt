@@ -28,6 +28,8 @@ data class WidgetData(
     val screenGoalMs: Long? = null,
     /** Pickups on a usual day, for the pickups ring. */
     val usualPickups: Int? = null,
+    /** One short line from your patterns: a run of quiet nights, or this week's change. */
+    val cue: String? = null,
 )
 
 object WidgetStore {
@@ -46,6 +48,7 @@ object WidgetStore {
             .putLong("at", d.updatedAt)
             .putLong("goal", d.screenGoalMs ?: -1L)
             .putInt("usualPickups", d.usualPickups ?: -1)
+            .putString("cue", d.cue)
             .apply()
     }
 
@@ -64,6 +67,7 @@ object WidgetStore {
             updatedAt = at,
             screenGoalMs = p.getLong("goal", -1L).takeIf { it > 0 },
             usualPickups = p.getInt("usualPickups", -1).takeIf { it > 0 },
+            cue = p.getString("cue", null),
         )
     }
 }
@@ -118,6 +122,10 @@ class WidgetUpdater
                             goalsStore.goals.value.dailyTargetMinutes?.let { it * 60_000L }
                                 ?: bundle?.typicalDay?.median?.takeIf { it.size == 25 }?.let { it[24] * 60_000L }?.takeIf { it > 0 },
                         usualPickups = bundle?.usualPickups,
+                        cue =
+                            bundle?.patterns.orEmpty().let { ps ->
+                                (ps.firstOrNull { it.kind == com.habitminer.analytics.PatternKind.LATE_FREE_RUN } ?: ps.firstOrNull { it.widgetLine != null })?.widgetLine
+                            },
                     ),
                 )
                 runCatching { TodayWidget().updateAll(context) }

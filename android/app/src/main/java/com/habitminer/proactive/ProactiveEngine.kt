@@ -370,7 +370,16 @@ class ProactiveEngine
             val sleep = SleepDetector.summarize(SleepDetector.detectRange(sessions, unlocks, samples, today, 7, now, zone), zone)
             val pickups = PickupAnalyzer.analyze(unlocks, notifications, sessions, weekStart, now) { appIdentityResolver.getAppName(it) }
             val week = WeekComparer.compare(sessions, today, zone)
-            return DigestBuilder.build(week, thisWeek, 7, sleep, pickups)
+            // Your patterns and goals, from the last analysis: a win first, then how goals are going.
+            val bundle = runCatching { analysis() }.getOrNull()
+            val highlights =
+                buildList {
+                    bundle?.patterns.orEmpty().firstOrNull { it.kind == com.habitminer.analytics.PatternKind.LATE_FREE_RUN || (it.fresh && it.good) }?.let { add(it.title) }
+                    bundle?.impacts.orEmpty().entries.firstOrNull { !it.value.tooEarly }?.let { (pkg, im) ->
+                        add(im.summary(appIdentityResolver.getAppName(pkg)).substringBefore(". But").substringBefore(". Your other"))
+                    }
+                }
+            return DigestBuilder.build(week, thisWeek, 7, sleep, pickups, highlights)
         }
 
         companion object {
