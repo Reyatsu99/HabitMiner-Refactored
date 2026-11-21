@@ -259,6 +259,7 @@ fun TodayScreen(
         // difference, which it usually repeats).
         val insightDone = rawInsight != null && !justAnswered && (rawInsight.hidden || rawInsight.feedback != null)
         val insight = rawInsight?.takeUnless { insightDone }
+        val shift = insights?.let { ins -> ins.deviations.shift?.takeIf { it.label == null && it.key !in ins.answers } }
         when {
             busySlot -> Unit
             nap != null ->
@@ -306,6 +307,11 @@ fun TodayScreen(
                         actions.giveDeviationFeedback(deviation.key, v)
                     }
                 }
+            shift != null ->
+                item(key = "shift") {
+                    Spacer(Modifier.height(22.dp))
+                    RoutineShiftCard(shift, null, compact = true) { value -> actions.labelPeriod(shift.key, shift.since, value) }
+                }
             // Nothing to answer: one quiet line, and now and then the widget offer.
             else ->
                 item(key = "caught-up") {
@@ -347,12 +353,6 @@ fun TodayScreen(
             }
         }
 
-        insights?.let { ins -> ins.deviations.shift?.takeIf { it.label == null && it.key !in ins.answers } }?.let { shift ->
-            item(key = "shift") {
-                Spacer(Modifier.height(16.dp))
-                RoutineShiftCard(shift, null, compact = true) { value -> actions.labelPeriod(shift.key, shift.since, value) }
-            }
-        }
 
         if (state.predictions.isNotEmpty()) {
             item(key = "next-header") {

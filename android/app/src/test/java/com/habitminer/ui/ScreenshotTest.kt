@@ -338,7 +338,14 @@ class ScreenshotTest {
     @Test
     fun todayCaughtUp() =
         shoot("24_today_caught_up", dark = false) {
-            val state = data.state.copy(widgetPrompt = true, insights = data.state.insights?.copy(naps = emptyList(), insight = null))
+            val ins = data.state.insights!!
+            // Everything answered: today's difference marked expected, the routine change labelled.
+            val state =
+                data.state.copy(
+                    widgetPrompt = true,
+                    deviationFeedback = kotlinx.collections.immutable.persistentMapOf<String, String>().putAll(ins.deviations.days.associate { it.key to com.habitminer.data.UserLabelEntity.FEEDBACK_EXPECTED }),
+                    insights = ins.copy(naps = emptyList(), insight = null, answers = ins.answers + listOfNotNull(ins.deviations.shift?.key?.let { it to "labelled" })),
+                )
             TodayScreen(state, NoActions, NoNav, dailyTargetMinutes = 240, now = data.now)
         }
 
