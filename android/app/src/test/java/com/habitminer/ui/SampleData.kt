@@ -46,12 +46,12 @@ object SampleData {
 
     private data class App(val pkg: String, val name: String, val stored: String)
 
-    private val evony = App("com.topgames.evony", "Evony", "GAMING")
+    private val evony = App("com.example.castlesiege", "Castle Siege", "GAMING")
     private val snapchat = App("com.snapchat.android", "Snapchat", "SOCIAL")
     private val telegram = App("org.telegram.messenger", "Telegram", "COMMUNICATION")
     private val whatsapp = App("com.whatsapp", "WhatsApp", "COMMUNICATION")
     private val brave = App("com.brave.browser", "Brave", "OTHER")
-    private val yt = App("com.drifty.yt", "YT (drifty)", "OTHER")
+    private val yt = App("com.google.android.youtube", "YouTube", "OTHER")
     private val gmail = App("com.google.android.gm", "Gmail", "PRODUCTIVITY")
     private val linkedin = App("com.linkedin.android", "LinkedIn", "PRODUCTIVITY")
     private val meet = App("com.google.android.apps.meetings", "Meet", "PRODUCTIVITY")
@@ -197,9 +197,9 @@ object SampleData {
             listOf(
                 DiscoveredHabitEntity(1, "🌙 Night Snapchat Routine", "Snapchat → Telegram", "[]", 1f, 10, "NIGHT", "WEEKDAY", now, now - 3 * 3_600_000L),
                 DiscoveredHabitEntity(2, "🌆 Evening Snapchat Routine", "Snapchat → Telegram", "[]", 0.9f, 9, "EVENING", "WEEKDAY", now, now - 26 * 3_600_000L),
-                DiscoveredHabitEntity(3, "🌆 Evening WhatsApp Routine", "YT (drifty) → WhatsApp", "[]", 0.9f, 9, "EVENING", "WEEKDAY", now, now - 22 * 3_600_000L),
+                DiscoveredHabitEntity(3, "🌆 Evening WhatsApp Routine", "YouTube → WhatsApp", "[]", 0.9f, 9, "EVENING", "WEEKDAY", now, now - 22 * 3_600_000L),
                 DiscoveredHabitEntity(4, "🌅 Morning Snapchat Routine", "Snapchat → Telegram → WhatsApp", "[]", 0.8f, 8, "MORNING", "WEEKDAY", now, now - 9 * 3_600_000L),
-                DiscoveredHabitEntity(5, "☀️ Afternoon Brave Routine", "Brave → YT (drifty)", "[]", 0.7f, 7, "AFTERNOON", "WEEKDAY", now, now - 30 * 3_600_000L),
+                DiscoveredHabitEntity(5, "☀️ Afternoon Brave Routine", "Brave → YouTube", "[]", 0.7f, 7, "AFTERNOON", "WEEKDAY", now, now - 30 * 3_600_000L),
             )
 
         val min = 60_000L
@@ -211,9 +211,9 @@ object SampleData {
                     "ALL", 3.1f, now, true,
                 ),
                 DayDeviation(
-                    today, DeviationKind.APP_DROP, "Much less Evony",
+                    today, DeviationKind.APP_DROP, "Much less Castle Siege",
                     "2m by 18:45, usually about 48m by now.",
-                    "Evony", 2f, now, true,
+                    "Castle Siege", 2f, now, true,
                 ),
                 DayDeviation(
                     today.minusDays(1), DeviationKind.APP_SPIKE, "More WhatsApp than usual",
@@ -235,8 +235,8 @@ object SampleData {
                 usualPerDayMs = 317 * min,
                 appChanges =
                     listOf(
-                        AppChange("Evony", 88 * min, 59 * min),
-                        AppChange("YT (drifty)", 47 * min, 19 * min),
+                        AppChange("Castle Siege", 88 * min, 59 * min),
+                        AppChange("YouTube", 47 * min, 19 * min),
                         AppChange("Instagram", 3 * min, 20 * min),
                     ),
             )

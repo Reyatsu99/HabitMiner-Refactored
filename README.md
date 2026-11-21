@@ -5,9 +5,9 @@
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.3-purple.svg)](https://kotlinlang.org/)
 [![Android](https://img.shields.io/badge/Android-8.0%2B-green.svg)](https://developer.android.com/)
-[![Version](https://img.shields.io/badge/Version-2.4.0--dev-blue.svg)](#-whats-new-in-extended)
+[![Version](https://img.shields.io/badge/Version-2.6.0--dev-blue.svg)](#-whats-new-in-extended)
 
-HabitMiner Extended is the next version of [HabitMiner](docs/archive/README_OLD.md). It installs as its own app (**HM Extended**, `com.habitminer.extended`) next to the original, can bring the original's history across, and adds a redesigned interface, better sleep and nap tracking, goals, a long list of accuracy fixes found by using it every day, shorter daily loops (2.1), and (in 2.2) **patterns**: what pulls you into your phone, what it costs you, and whether your changes are working.
+HabitMiner Extended is the next version of [HabitMiner](docs/archive/README_OLD.md). It installs as its own app (**HM Extended**, `com.habitminer.extended`) next to the original, can bring the original's history across, and adds a redesigned interface, better sleep and nap tracking, goals, a long list of accuracy fixes found by using it every day, shorter daily loops (2.1), and (in 2.2) **patterns**: what pulls you into your phone, what it costs you, and whether your changes are working. Version 2.6 adds plain-language stories, notification-noise insights and more actionable sleep patterns.
 
 Everything stays on the phone. There is no account and no server; data leaves the device only when you export it.
 
@@ -18,6 +18,35 @@ Everything stays on the phone. There is no account and no server; data leaves th
 <p align="center">
   <img src="docs/screenshots/extended/overview.png" alt="HabitMiner Extended: Today, Sleep, Trends, Goals and Status" width="100%">
 </p>
+
+### New in 2.6: stories, in plain words
+
+Today opens with stories, like Instagram's: **Today** (one or two insights), **Last night** and **Your week**. Each slide says what's going on in one sentence, what it means (how habits like this usually work), and one thing to try, with a button where it helps. The numbers are one tap away, not in your face. A bubble stays coloured until you've watched it.
+
+<table>
+  <tr>
+    <td align="center" valign="top" width="25%">
+      <img src="docs/screenshots/extended/today.png" alt="Today with stories" width="200"><br>
+      <b>Today</b><br>
+      <sub>Stories at the top, and today's insight as a card that dims once read.</sub>
+    </td>
+    <td align="center" valign="top" width="25%">
+      <img src="docs/screenshots/extended/story_long_sessions.png" alt="Where your time goes" width="200"><br>
+      <b>Where your time goes</b><br>
+      <sub>Not "63% of its time": what it means, and what to try.</sub>
+    </td>
+    <td align="center" valign="top" width="25%">
+      <img src="docs/screenshots/extended/story_last_night.png" alt="Last night" width="200"><br>
+      <b>Last night</b><br>
+      <sub>Why the night was short, and a pause for the apps behind it.</sub>
+    </td>
+    <td align="center" valign="top" width="25%">
+      <img src="docs/screenshots/extended/story_noise.png" alt="Notification noise" width="200"><br>
+      <b>Notification noise</b><br>
+      <sub>Apps whose alerts you clear hundreds of times and never open.</sub>
+    </td>
+  </tr>
+</table>
 
 ### New in 2.2: your patterns
 
@@ -211,6 +240,16 @@ Everything stays on the phone. There is no account and no server; data leaves th
 
 ## 🆕 What's new in Extended
 
+### 2.3 to 2.6: written for people, not analysts
+- **Stories on Today** (2.5–2.6): Today, Last night and Your week as tap-through slides in plain words, with the numbers behind "See the numbers". Today's insight is also a card that dims once read. Steps, "Notified" and "Likely next" moved to Trends.
+- **The same voice everywhere** (2.6): pattern cards on Trends, the unusual-day insight and the Weekly Story lead with what it means and what to try.
+- **Actions where the insight is**: pause the apps behind late nights after 23:00 (weeknights only by default), a pause for the last app before sleep, notification settings for apps that pull you in or that you never open, and "Try this week" in the Weekly Story.
+- **Notification noise** (2.6): apps whose notifications you clear (or "clear all") and almost never open. Notifications an app withdrew by itself, system notices and the alarm clock are left out.
+- **Honest goals** (2.3–2.4): "Is it working?" checks whether saved time just moved to other leisure apps, suggests something else when you tap through most pauses, and shows why each pause was set up, on the pause screen too.
+- **Your call on mixed apps** (2.4): mark an app as leisure or work/study, so lecture videos aren't flagged as late-night scrolling.
+- **Patterns you can put away** (2.3): "That's intentional" or "Hide", undone in Settings.
+- **Fixes**: Google search-bar launches aren't counted as a habit; uninstalled apps drop out of guesses and patterns; the alarm clock never counts as the last or first app around sleep; pausing several apps opens Android's settings once; on Android 13+ HabitMiner explains restricted settings before sending you to a greyed-out switch.
+
 ### 2.2: from reporting to findings
 Screen time, pickups and per-app time are what Android's Digital Wellbeing already shows. 2.2 adds what it can't: patterns that connect time of day, app order, notifications and sleep, found in your own data.
 - **Your patterns** (Trends → Overview, and one on Today once you're caught up):
@@ -294,7 +333,7 @@ More background on the original design is in [docs/ARCHITECTURE.md](docs/ARCHITE
 ## 🚀 Getting started
 
 ### Install
-Pushes to `main` and pull requests targeting `main` run the build and unit-test workflow. Main-branch builds publish screenshots and APKs to `ci-out-main`; pull-request builds upload APKs as workflow artifacts. Release builds are published from version tags such as `v2.4.0`.
+Pushes to `main` and pull requests targeting `main` run the build and unit-test workflow. Main-branch builds publish screenshots and APKs to `ci-out-main`; pull-request builds upload APKs as workflow artifacts. Release builds are published from version tags such as `v2.6.0`.
 
 To bring your history across: in HabitMiner, open Settings and tap **Export data**, then share the ZIP to **HM Extended** (or use **Choose file** on the Today import card).
 

@@ -56,6 +56,8 @@ data class AppGuards(
      * night start (minute of the day) pause it only from then until 05:00.
      */
     val onGuard: (GuardRequest) -> Unit,
+    /** Several at once (one trip to Android's settings, not one per app). */
+    val onGuardAll: (List<GuardRequest>) -> Unit = { rs -> rs.forEach(onGuard) },
     val onOpenGoals: () -> Unit,
 ) {
     val pauseWorks: Boolean get() = pauseEnabled && serviceOn

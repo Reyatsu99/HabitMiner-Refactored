@@ -78,9 +78,20 @@ fun InsightPanel(
         Spacer(Modifier.height(6.dp))
         Text(insight.title, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface)
         Spacer(Modifier.height(4.dp))
-        Text(insight.body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Spacer(Modifier.height(8.dp))
-        Text("Why this: ${insight.why}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        // What it means in plain words; the numbers and why it was picked on request.
+        val meaning = remember(insight.key) { com.habitminer.analytics.Explainer.insightMeaning(insight.key) }
+        var numbers by remember(insight.key) { mutableStateOf(meaning == null) }
+        meaning?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        if (numbers) {
+            if (meaning != null) Spacer(Modifier.height(6.dp))
+            Text(insight.body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(8.dp))
+            Text("Why this: ${insight.why}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } else {
+            TextButton(onClick = { numbers = true }, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 0.dp)) {
+                Text("See the numbers", color = hue.text)
+            }
+        }
         guardApp?.let { (pkg, name) ->
             Spacer(Modifier.height(10.dp))
             com.habitminer.ui.design.GuardActions(pkg, name, reason = insight.title)
