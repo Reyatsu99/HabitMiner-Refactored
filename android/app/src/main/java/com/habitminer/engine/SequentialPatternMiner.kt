@@ -121,37 +121,12 @@ internal object SequentialPatternMiner {
             days.indices.map { Projection(it, 0, Long.MIN_VALUE) },
         )
 
-        // Keep longer patterns when they explain a shorter subsequence with nearly the same
-        // support. Subsequence matching (not only contiguous matching) is important here.
-        val accepted = mutableListOf<MinedSequencePattern>()
-        for (candidate in discovered.sortedWith(
-            compareByDescending<MinedSequencePattern> { it.packageSequence.size }
-                .thenByDescending { it.occurrences }
-                .thenBy { it.packageSequence.joinToString("\u0000") },
-        )) {
-            val redundant = accepted.any { longer ->
-                longer.packageSequence.size > candidate.packageSequence.size &&
-                    isSubsequence(candidate.packageSequence, longer.packageSequence) &&
-                    candidate.occurrences <= longer.occurrences + 1
-            }
-            if (!redundant) accepted += candidate
-        }
-
-        return accepted.sortedWith(
+        // Preserve meaningful shorter subsequences as well as longer patterns: an A → B
+        // routine can remain useful even when A → X → B is also common.
+        return discovered.distinctBy { it.packageSequence }.sortedWith(
             compareByDescending<MinedSequencePattern> { it.occurrences }
                 .thenByDescending { it.packageSequence.size }
                 .thenBy { it.packageSequence.joinToString("\u0000") },
         )
-    }
-
-    private fun isSubsequence(
-        shorter: List<String>,
-        longer: List<String>,
-    ): Boolean {
-        var matched = 0
-        for (token in longer) {
-            if (matched < shorter.size && shorter[matched] == token) matched++
-        }
-        return matched == shorter.size
     }
 }
