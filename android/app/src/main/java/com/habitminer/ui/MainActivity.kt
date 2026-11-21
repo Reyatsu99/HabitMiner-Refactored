@@ -35,6 +35,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -215,7 +216,36 @@ class MainActivity : ComponentActivity() {
                         ),
                 )
             }
+        // Use less / mindful pause actions, available wherever an app is mentioned.
+        var resumeTick by androidx.compose.runtime.remember { androidx.compose.runtime.mutableIntStateOf(0) }
+        androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) { resumeTick++ }
+        val pauseEnabled = androidx.compose.runtime.remember(resumeTick, goals) { com.habitminer.mindful.MindfulPause.enabled(this) }
+        val serviceOn = androidx.compose.runtime.remember(resumeTick) { com.habitminer.mindful.MindfulPause.serviceOn(this) }
+        val guards =
+            com.habitminer.ui.design.AppGuards(
+                useLess = goals.useLess.toSet(),
+                pauseEnabled = pauseEnabled,
+                serviceOn = serviceOn,
+                onGuard = { pkg, pause ->
+                    goalsStore.update { g -> g.copy(useLess = (g.useLess - pkg) + pkg, useMore = g.useMore - pkg) }
+                    if (pause) {
+                        com.habitminer.mindful.MindfulPause.setEnabled(this, true)
+                        if (!com.habitminer.mindful.MindfulPause.serviceOn(this)) {
+                            // First time: straight to Android's switch. If that's blocked
+                            // (restricted settings), Settings explains how to allow it.
+                            if (pauseEnabled) {
+                                nav.navigate(ROUTE_SETTINGS) { launchSingleTop = true }
+                            } else {
+                                runCatching { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+                            }
+                        }
+                    }
+                    resumeTick++
+                },
+                onOpenGoals = { nav.goTab(Tab.GOALS.route) },
+            )
         // A bottom bar on phones, a rail on wider screens.
+        androidx.compose.runtime.CompositionLocalProvider(com.habitminer.ui.design.LocalAppGuards provides guards) {
         NavigationSuiteScaffold(
             navigationSuiteItems = {
                 Tab.entries.forEach { tab ->
@@ -314,6 +344,7 @@ class MainActivity : ComponentActivity() {
                 }
                 composable(ROUTE_STORY) { com.habitminer.ui.story.StoryRoute(onBack = { nav.popBackStack() }) }
             }
+        }
         }
     }
 

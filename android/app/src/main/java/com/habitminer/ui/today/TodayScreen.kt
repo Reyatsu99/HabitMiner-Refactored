@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Flag
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Widgets
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.AutoAwesome
@@ -25,7 +27,6 @@ import androidx.compose.material.icons.rounded.Explore
 import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.TrendingUp
 import androidx.compose.material.icons.rounded.TrendingDown
-import androidx.compose.material.icons.rounded.Lightbulb
 import com.habitminer.ui.design.MetricTile
 import com.habitminer.ui.design.TileRow
 import com.habitminer.ui.design.ActivityRings
@@ -61,8 +62,10 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.habitminer.analytics.CheckInOption
 import com.habitminer.analytics.Confidence
-import com.habitminer.analytics.ContextInsight
 import com.habitminer.analytics.DayDeviation
+import com.habitminer.analytics.DayPhase
+import com.habitminer.analytics.DayPulse
+import com.habitminer.analytics.DeviationKind
 import com.habitminer.analytics.DayRibbonBuilder
 import com.habitminer.analytics.Format
 import com.habitminer.analytics.Light
@@ -85,7 +88,6 @@ import com.habitminer.ui.design.HeroContainer
 import com.habitminer.ui.design.HeroDuration
 import com.habitminer.ui.design.ScreenPadding
 import com.habitminer.ui.design.SectionHeader
-import com.habitminer.ui.design.SleepLane
 import com.habitminer.ui.design.StatColumn
 import com.habitminer.ui.design.StatRow
 import com.habitminer.ui.design.grouped
@@ -171,7 +173,17 @@ fun TodayScreen(
             TodayRings(state, dailyTargetMinutes, zone)
             Column(modifier = Modifier.padding(horizontal = ScreenPadding)) {
                 Spacer(Modifier.height(14.dp))
-                ComparisonLine(state.todayScreenTimeMs, state.typicalUsage, today)
+                val usualBed = insights?.sleepWeek?.avgBedtimeMinutes ?: insights?.sleepSummary?.avgBedtimeMinutes
+                val phase = remember(now / 60_000L, lastNight?.wakeTime, usualBed) { DayPulse.phase(now, lastNight?.wakeTime, usualBed, zone) }
+                when {
+                    phase == DayPhase.MORNING && lastNight != null -> MorningLine(lastNight, zone, nav::openSleep)
+                    phase == DayPhase.EVENING -> {
+                        ComparisonLine(state.todayScreenTimeMs, state.typicalUsage, today)
+                        Spacer(Modifier.height(6.dp))
+                        WrapUpLine(state.todayScreenTimeMs, dailyTargetMinutes, usualBed)
+                    }
+                    else -> ComparisonLine(state.todayScreenTimeMs, state.typicalUsage, today)
+                }
                 intention?.let {
                     Spacer(Modifier.height(10.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -241,7 +253,6 @@ fun TodayScreen(
             insights?.deviations?.days
                 ?.filter { it.date == today && it.explainedBy == null && state.deviationFeedback[it.key] != UserLabelEntity.FEEDBACK_EXPECTED }
                 ?.maxByOrNull { it.score }
-        val contextInsight = insights?.contextInsights?.firstOrNull()
         val rawInsight = insights?.insight
         val justAnswered = rawInsight != null && answeredInsight == rawInsight.key
         // Answered or put away earlier today: out of the way until tomorrow (and so is today's
@@ -269,6 +280,7 @@ fun TodayScreen(
                     Spacer(Modifier.height(22.dp))
                     InsightPanel(
                         insight = insight,
+                        guardApp = insightApp(insight.key)?.let { name -> appPackage(state, name) to name },
                         showExplainer = !state.insightSettings.explainerSeen,
                         justAnswered = justAnswered,
                         onFeedback = { v ->
@@ -289,14 +301,25 @@ fun TodayScreen(
             deviation != null && !insightDone ->
                 item(key = "deviation-${deviation.key}") {
                     Spacer(Modifier.height(22.dp))
-                    DeviationPanel(deviation, state.deviationFeedback[deviation.key], nav::openChanges) { v ->
+                    val app = deviation.subject.takeIf { deviation.kind == DeviationKind.APP_SPIKE || deviation.kind == DeviationKind.APP_NEW }
+                    DeviationPanel(deviation, state.deviationFeedback[deviation.key], app?.let { appPackage(state, it) to it }, nav::openChanges) { v ->
                         actions.giveDeviationFeedback(deviation.key, v)
                     }
                 }
-            contextInsight != null ->
-                item(key = "insight") {
-                    Spacer(Modifier.height(22.dp))
-                    ContextInsightPanel(contextInsight)
+            // Nothing to answer: one quiet line, and now and then the widget offer.
+            else ->
+                item(key = "caught-up") {
+                    Spacer(Modifier.height(18.dp))
+                    CaughtUpLine(
+                        cue =
+                            state.features.moodMinute.takeIf {
+                                state.features.moodCheck && TimeUtil.minuteOfDay(now, zone) < it
+                            }?.let { "Mood check at ${Format.clockFromMinutes(it)}" },
+                    )
+                    if (state.widgetPrompt) {
+                        Spacer(Modifier.height(14.dp))
+                        WidgetPromptPanel(onAdd = actions::pinWidget, onNotNow = actions::dismissWidgetPrompt)
+                    }
                 }
         }
 
@@ -328,33 +351,6 @@ fun TodayScreen(
             item(key = "shift") {
                 Spacer(Modifier.height(16.dp))
                 RoutineShiftCard(shift, null, compact = true) { value -> actions.labelPeriod(shift.key, shift.since, value) }
-            }
-        }
-
-        if (lastNight != null) {
-            item(key = "sleep-header") {
-                SectionHeader("Last night", actionLabel = "Sleep", onAction = nav::openSleep, icon = Icons.Rounded.Bedtime, iconColor = LocalDataColors.current.sleepHue.start)
-            }
-            item(key = "sleep") {
-                SleepLane(lastNight, naps = todayNaps, zone = zone)
-                Spacer(Modifier.height(8.dp))
-                val day = insights?.sleepToday
-                Text(
-                    buildAnnotatedString {
-                        withStyle(SpanStyle(fontWeight = FontWeight.SemiBold, color = LocalDataColors.current.sleepHue.text)) {
-                            append("${Format.duration(lastNight.durationMs)} asleep")
-                        }
-                        append(", ${Format.clock(lastNight.sleepStart, zone)} to ${Format.clock(lastNight.wakeTime, zone)}")
-                        if (lastNight.briefWakes.isNotEmpty()) {
-                            append(if (lastNight.briefWakes.size == 1) ", woke briefly once" else ", woke briefly ${lastNight.briefWakes.size} times")
-                        }
-                        if (day != null && day.naps.isNotEmpty()) append(". With today's nap: ${Format.duration(day.totalMs)}")
-                        if (lastNight.confidence == Confidence.LOW) append(" (a rough guess)")
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = ScreenPadding),
-                )
             }
         }
 
@@ -392,7 +388,7 @@ fun TodayScreen(
             item(key = "apps") {
                 val packages = remember(state.todayAppUsage) { state.todayAppUsage.associate { it.appName to it.packageName } }
                 val categories = remember(todaySessions) { todaySessions.associate { it.appName to it.category } }
-                val top = remember(state.todayUsageByApp) { state.todayUsageByApp.entries.sortedByDescending { it.value }.take(5) }
+                val top = remember(state.todayUsageByApp) { state.todayUsageByApp.entries.sortedByDescending { it.value }.take(3) }
                 BarList(
                     top.map { (app, ms) ->
                         BarItem(
@@ -407,7 +403,6 @@ fun TodayScreen(
             }
         }
 
-        item(key = "around") { AroundYou(state) }
     }
 }
 
@@ -557,6 +552,8 @@ private fun CheckInPanel(
 private fun DeviationPanel(
     dev: DayDeviation,
     feedback: String?,
+    /** (package, name) when the difference is more use of one app. */
+    guardApp: Pair<String?, String>?,
     onSeeAll: () -> Unit,
     onFeedback: (String) -> Unit,
 ) {
@@ -568,6 +565,10 @@ private fun DeviationPanel(
         Text(dev.title, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface)
         Spacer(Modifier.height(4.dp))
         Text(dev.detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        guardApp?.let { (pkg, name) ->
+            Spacer(Modifier.height(10.dp))
+            com.habitminer.ui.design.GuardActions(pkg, name)
+        }
         Spacer(Modifier.height(14.dp))
         when (feedback) {
             UserLabelEntity.FEEDBACK_UNUSUAL -> Text("You marked this as unusual.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -587,21 +588,9 @@ private fun DeviationPanel(
     }
 }
 
-@Composable
-private fun ContextInsightPanel(insight: ContextInsight) {
-    val hue = LocalDataColors.current.nowHue
-    HeroContainer(accent = hue.start) {
-        com.habitminer.ui.design.Kicker("Worth knowing", hue, Icons.Rounded.Lightbulb)
-        Spacer(Modifier.height(6.dp))
-        Text(insight.headline, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface)
-        Spacer(Modifier.height(4.dp))
-        Text(insight.detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-}
-
 /** Light, motion, battery and place from the latest reading, as quiet labelled items. */
 @Composable
-private fun AroundYou(state: HabitUiState) {
+internal fun AroundYou(state: HabitUiState) {
     val sensors = state.latestSensorContext
     val latest = state.latestContext
     if (sensors == null && latest == null) return
@@ -673,5 +662,115 @@ private fun AroundItem(
         Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
         Spacer(Modifier.width(6.dp))
         Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
+    }
+}
+
+/** The app an insight is about, when it's more use of one app ("date|APPS|APP_SPIKE|Instagram"). */
+private fun insightApp(key: String): String? {
+    val parts = key.split('|')
+    if (parts.size < 4) return null
+    return parts.drop(3).joinToString("|").takeIf { parts[2] == DeviationKind.APP_SPIKE.name || parts[2] == DeviationKind.APP_NEW.name }
+}
+
+/** An app's package from its name, from the apps HabitMiner has seen. */
+internal fun appPackage(
+    state: HabitUiState,
+    appName: String,
+): String? =
+    state.appSummaries.firstOrNull { it.appName == appName }?.packageName
+        ?: state.todayAppUsage.firstOrNull { it.appName == appName }?.packageName
+
+/** The morning hero line: last night, with a way to the Sleep screen. */
+@Composable
+private fun MorningLine(
+    night: com.habitminer.analytics.SleepEstimate,
+    zone: ZoneId,
+    onOpenSleep: () -> Unit,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Rounded.Bedtime, contentDescription = null, tint = LocalDataColors.current.sleepHue.text, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(
+            buildAnnotatedString {
+                withStyle(SpanStyle(fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)) {
+                    append("${Format.duration(night.durationMs)} asleep")
+                }
+                append(", ${Format.clock(night.sleepStart, zone)} to ${Format.clock(night.wakeTime, zone)}")
+                if (night.briefWakes.isNotEmpty()) {
+                    append(if (night.briefWakes.size == 1) ", woke briefly once" else ", woke briefly ${night.briefWakes.size} times")
+                }
+                if (night.confidence == Confidence.LOW) append(" (a rough guess)")
+            },
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = onOpenSleep) { Text("Sleep", color = LocalDataColors.current.sleepHue.text) }
+    }
+}
+
+/** The evening wrap-up: where today stands against your target, and your usual bedtime. */
+@Composable
+private fun WrapUpLine(
+    screenMs: Long,
+    dailyTargetMinutes: Int?,
+    usualBedMinutes: Int?,
+) {
+    val parts =
+        listOfNotNull(
+            dailyTargetMinutes?.let { t ->
+                val left = t * 60_000L - screenMs
+                if (left >= 0) "${Format.duration(left)} left of your ${Format.duration(t * 60_000L)} target" else "${Format.duration(-left)} over your ${Format.duration(t * 60_000L)} target"
+            },
+            usualBedMinutes?.let { "you usually fall asleep around ${Format.clockFromMinutes(DayPulse.clockMinute(it))}" },
+        )
+    if (parts.isEmpty()) return
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Rounded.Bedtime, contentDescription = null, tint = LocalDataColors.current.sleepHue.text, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(8.dp))
+        Text(
+            parts.joinToString("; ").replaceFirstChar { it.uppercase() } + ".",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** Nothing waiting for an answer. */
+@Composable
+private fun CaughtUpLine(cue: String?) {
+    Row(modifier = Modifier.padding(horizontal = ScreenPadding), verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = LocalDataColors.current.goodHue.text, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(8.dp))
+        Text("All caught up", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface)
+        cue?.let {
+            Spacer(Modifier.width(8.dp))
+            Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** Once, after two days: today's rings on the home screen. */
+@Composable
+private fun WidgetPromptPanel(
+    onAdd: () -> Unit,
+    onNotNow: () -> Unit,
+) {
+    val hue = LocalDataColors.current.screenHue
+    HeroContainer(accent = hue.start) {
+        com.habitminer.ui.design.Kicker("On your home screen", hue, Icons.Rounded.Widgets)
+        Spacer(Modifier.height(6.dp))
+        Text("See today at a glance", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "The Today widget shows screen time, pickups and your longest phone-free stretch without opening the app.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            com.habitminer.ui.design.HueButton("Add widget", hue, onAdd)
+            TextButton(onClick = onNotNow) { Text("Not now", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
     }
 }

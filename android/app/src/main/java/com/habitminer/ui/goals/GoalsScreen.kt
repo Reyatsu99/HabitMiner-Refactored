@@ -12,6 +12,7 @@ import androidx.compose.material.icons.rounded.TrendingUp
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.Flag
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -63,6 +64,8 @@ import com.habitminer.ui.design.ScreenTitle
 import com.habitminer.ui.design.SectionHeader
 import com.habitminer.ui.design.rememberConfirmHaptic
 import com.habitminer.ui.theme.LocalDataColors
+import com.habitminer.analytics.GoalDay
+import com.habitminer.analytics.GoalWeek
 import java.time.LocalDate
 
 @Composable
@@ -74,8 +77,8 @@ fun GoalsScreen(
     onChange: ((Goals) -> Goals) -> Unit,
     onOpenApp: (String) -> Unit,
     modifier: Modifier = Modifier,
+    today: LocalDate = LocalDate.now(),
 ) {
-    val today = remember { LocalDate.now() }
     var picking by rememberSaveable { mutableStateOf<String?>(null) } // "less" or "more"
     val byPackage = remember(apps) { apps.associateBy { it.packageName } }
     val haptic = rememberConfirmHaptic()
@@ -110,7 +113,7 @@ fun GoalsScreen(
                     ) { Text(m?.let { "${it / 60}h" } ?: "None") }
                 }
             }
-            goals.dailyTargetMinutes?.let { target -> TargetProgress(target, todayMs, dailyTotals) }
+            goals.dailyTargetMinutes?.let { target -> TargetProgress(target, todayMs, dailyTotals, today) }
         }
 
         item(key = "less") {
@@ -118,7 +121,7 @@ fun GoalsScreen(
             if (goals.useLess.isEmpty()) {
                 Note("Pick apps you'd like to spend less time in. You'll see how this week compares with last week.")
             } else {
-                AppGoalRows(goals.useLess, byPackage, less = true, onOpenApp = onOpenApp)
+                AppGoalRows(goals.useLess, byPackage, less = true, today = today, onOpenApp = onOpenApp)
             }
         }
 
@@ -149,7 +152,7 @@ fun GoalsScreen(
             if (goals.useMore.isEmpty()) {
                 Note("Pick apps you'd like to use more, like a language course or a reading app.")
             } else {
-                AppGoalRows(goals.useMore, byPackage, less = false, onOpenApp = onOpenApp)
+                AppGoalRows(goals.useMore, byPackage, less = false, today = today, onOpenApp = onOpenApp)
             }
         }
     }
@@ -215,12 +218,12 @@ private fun TargetProgress(
     targetMinutes: Int,
     todayMs: Long,
     daily: List<Pair<LocalDate, Long>>,
+    today: LocalDate,
 ) {
     val colors = LocalDataColors.current
     val targetMs = targetMinutes * 60_000L
-    val week = daily.takeLast(7)
-    val past = week.dropLast(1)
-    val under = past.count { it.second in 1..targetMs }
+    val days = remember(daily, todayMs, targetMs) { GoalWeek.underTarget(daily.filter { it.first != today } + (today to todayMs), today, targetMs) }
+    val (met, withData) = GoalWeek.count(days)
     val left = targetMs - todayMs
     Row(modifier = Modifier.padding(horizontal = ScreenPadding, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
         com.habitminer.ui.design.ActivityRings(
@@ -232,38 +235,57 @@ private fun TargetProgress(
         Spacer(Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                if (left >= 0) "${Format.duration(left)} left today" else "${Format.duration(-left)} over today",
+                if (left >= 0) "On track today, ${Format.duration(left)} left" else "${Format.duration(-left)} over today",
                 style = MaterialTheme.typography.titleMedium,
                 color = if (left >= 0) colors.screenHue.text else colors.alert,
             )
-            if (past.isNotEmpty()) {
-                Spacer(Modifier.height(8.dp))
-                // One dot a day: green when under the target, pink when over, grey without data.
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    past.forEach { (day, ms) ->
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            val c =
-                                when {
-                                    ms <= 0L -> colors.track
-                                    ms <= targetMs -> colors.goodHue.start
-                                    else -> colors.screenHue.start
-                                }
-                            Box(Modifier.size(16.dp).clip(androidx.compose.foundation.shape.CircleShape).background(c))
-                            Spacer(Modifier.height(2.dp))
-                            Text(
-                                day.dayOfWeek.getDisplayName(java.time.format.TextStyle.NARROW, java.util.Locale.getDefault()),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
+            Spacer(Modifier.height(8.dp))
+            GoalDots(days, labels = true)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Under target on $met of the last ${if (withData < 7) "$withData day${if (withData == 1) "" else "s"} with data" else "7 days"}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/**
+ * Seven dots, oldest first: green on a day that went your way, pink when it didn't, grey
+ * without data. Today is a ring, still in progress.
+ */
+@Composable
+private fun GoalDots(
+    days: List<GoalDay>,
+    labels: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val colors = LocalDataColors.current
+    val dot = if (labels) 16.dp else 10.dp
+    Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(if (labels) 6.dp else 5.dp)) {
+        days.forEach { d ->
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                val c =
+                    when (d.met) {
+                        null -> colors.track
+                        true -> colors.goodHue.start
+                        false -> colors.screenHue.start
                     }
+                val shape = androidx.compose.foundation.shape.CircleShape
+                if (d.today) {
+                    Box(Modifier.size(dot).border(2.dp, c, shape))
+                } else {
+                    Box(Modifier.size(dot).clip(shape).background(c))
                 }
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "Under target on $under of the last ${past.size} days",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                if (labels) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        d.date.dayOfWeek.getDisplayName(java.time.format.TextStyle.NARROW, java.util.Locale.getDefault()),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }
@@ -274,6 +296,7 @@ private fun AppGoalRows(
     packages: List<String>,
     byPackage: Map<String, AppSummary>,
     less: Boolean,
+    today: LocalDate,
     onOpenApp: (String) -> Unit,
 ) {
     RowGroup {
@@ -282,22 +305,27 @@ private fun AppGoalRows(
             row {
                 val week = a?.weekMs ?: 0L
                 val previous = a?.let { prevWeekMs(it) } ?: 0L
-                val change = week - previous
+                val days = remember(a) { a?.let { GoalWeek.againstLastWeek(it.last14, today, more = !less) }.orEmpty() }
+                val (met, withData) = GoalWeek.count(days)
                 val verdict =
                     when {
                         a == null -> "Not used in the last five weeks"
-                        previous == 0L -> "${Format.duration(week / 7)} a day this week"
-                        kotlin.math.abs(change) < 10 * 60_000L -> "About the same as last week"
-                        (change < 0) == less -> "${Format.duration(kotlin.math.abs(change))} ${if (change < 0) "less" else "more"} than last week, on track"
-                        else -> "${Format.duration(kotlin.math.abs(change))} ${if (change < 0) "less" else "more"} than last week"
+                        previous == 0L || days.isEmpty() -> "${Format.duration(week / 7)} a day this week"
+                        less -> "Under last week's average on $met of the last $withData days"
+                        else -> "At or above last week's average on $met of the last $withData days"
                     }
-                ListRow(
-                    a?.appName ?: pkg.substringAfterLast('.'),
-                    supporting = verdict,
-                    leading = { AppIcon(pkg, a?.appName ?: pkg, size = 36.dp) },
-                    trailingText = Format.duration(week),
-                    onClick = { onOpenApp(pkg) },
-                )
+                Column {
+                    ListRow(
+                        a?.appName ?: pkg.substringAfterLast('.'),
+                        supporting = verdict,
+                        leading = { AppIcon(pkg, a?.appName ?: pkg, size = 36.dp) },
+                        trailingText = Format.duration(week),
+                        onClick = { onOpenApp(pkg) },
+                    )
+                    if (days.isNotEmpty()) {
+                        GoalDots(days, labels = false, modifier = Modifier.padding(start = 68.dp, bottom = 12.dp))
+                    }
+                }
             }
         }
     }

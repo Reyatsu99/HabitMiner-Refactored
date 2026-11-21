@@ -102,6 +102,8 @@ private fun androidx.compose.foundation.lazy.LazyListScope.detail(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            androidx.compose.foundation.layout.Spacer(Modifier.height(10.dp))
+            com.habitminer.ui.design.GuardActions(d.packageName, d.appName)
         }
     }
     item(key = "stats") {

@@ -48,16 +48,20 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
+import com.habitminer.analytics.PauseContext
 import com.habitminer.analytics.TimeUtil
 import com.habitminer.collection.DeviceEvents
 import com.habitminer.data.DeviceEventEntity
 import com.habitminer.domain.AppIdentityResolver
+import com.habitminer.engine.AnalyticsMappers
 import com.habitminer.repository.ContextRepository
 import com.habitminer.ui.design.AppIcon
 import com.habitminer.ui.theme.HabitMinerTheme
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.ZoneId
 import javax.inject.Inject
 
@@ -79,11 +83,16 @@ class PauseActivity : ComponentActivity() {
         // Animations off in system settings: keep the circle still.
         val reduced = android.provider.Settings.Global.getFloat(contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
         val focusUntil = MindfulPause.focusUntil(this)
-        var opensToday by mutableIntStateOf(-1)
+        // The timer shows straight away; the context (one indexed query) fills in a moment later.
+        var context by mutableStateOf<PauseContext?>(null)
         lifecycleScope.launch {
             val zone = ZoneId.systemDefault()
-            val start = TimeUtil.startOfDay(TimeUtil.dateOf(System.currentTimeMillis(), zone), zone)
-            opensToday = runCatching { contextRepository.getUsageForPackageSince(pkg, start).size }.getOrDefault(-1)
+            val now = System.currentTimeMillis()
+            context =
+                runCatching {
+                    val sessions = withContext(Dispatchers.IO) { contextRepository.getUsageForPackageSince(pkg, now - 14 * TimeUtil.DAY) }
+                    PauseContext.build(sessions.map(AnalyticsMappers::session), now, zone)
+                }.getOrNull()
         }
         setContent {
             HabitMinerTheme(darkTheme = isSystemInDarkTheme()) {
@@ -94,7 +103,7 @@ class PauseActivity : ComponentActivity() {
                         appName = name,
                         seconds = seconds,
                         reduced = reduced,
-                        opensToday = opensToday,
+                        context = context,
                         focusUntil = focusUntil,
                         onOpen = { open(pkg) },
                         onLeave = { leave(pkg, focusUntil != null) },
@@ -153,12 +162,12 @@ class PauseActivity : ComponentActivity() {
 }
 
 @Composable
-private fun PauseScreen(
+internal fun PauseScreen(
     pkg: String,
     appName: String,
     seconds: Int,
     reduced: Boolean,
-    opensToday: Int,
+    context: PauseContext?,
     focusUntil: Long?,
     onOpen: () -> Unit,
     onLeave: () -> Unit,
@@ -194,15 +203,17 @@ private fun PauseScreen(
             textAlign = TextAlign.Center,
         )
         Spacer(Modifier.height(6.dp))
+        // Two lines kept free so nothing moves when the context arrives.
         Text(
             when {
                 focusUntil != null -> "Focus session until ${com.habitminer.analytics.Format.clock(focusUntil, ZoneId.systemDefault())}. $appName can wait."
-                opensToday > 0 -> "You've opened $appName $opensToday time${if (opensToday == 1) "" else "s"} today. Is this what you want right now?"
-                else -> "Is $appName what you want right now?"
+                context != null -> context.lines(appName).joinToString(" ")
+                else -> ""
             },
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
+            minLines = 2,
         )
         Spacer(Modifier.height(36.dp))
         Box(Modifier.size(180.dp), contentAlignment = Alignment.Center) {
@@ -219,11 +230,11 @@ private fun PauseScreen(
             )
         }
         Spacer(Modifier.height(36.dp))
-        Button(onClick = onLeave, modifier = Modifier.fillMaxWidth()) { Text("Not now") }
+        Button(onClick = onLeave, modifier = Modifier.fillMaxWidth().height(56.dp)) { Text("Close $appName", style = MaterialTheme.typography.titleMedium) }
         Spacer(Modifier.height(8.dp))
         if (focusUntil == null) {
-            OutlinedButton(onClick = onOpen, enabled = left == 0, modifier = Modifier.fillMaxWidth()) {
-                Text(if (left > 0) "Open $appName in $left s" else "Open $appName")
+            TextButton(onClick = onOpen, enabled = left == 0, modifier = Modifier.fillMaxWidth()) {
+                Text(if (left > 0) "Open $appName anyway in $left s" else "Open $appName anyway")
             }
         } else if (!showEnd) {
             TextButton(onClick = { showEnd = true }) { Text("End focus to open $appName") }

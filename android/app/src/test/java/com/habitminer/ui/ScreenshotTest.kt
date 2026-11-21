@@ -97,6 +97,17 @@ class ScreenshotTest {
         registerSensors()
     }
 
+    /** The first two apps are on Use less with the pause working, as in the Goals shots. */
+    private val guards: com.habitminer.ui.design.AppGuards
+        get() =
+            com.habitminer.ui.design.AppGuards(
+                useLess = data.state.appSummaries.take(2).map { it.packageName }.toSet(),
+                pauseEnabled = true,
+                serviceOn = true,
+                onGuard = { _, _ -> },
+                onOpenGoals = {},
+            )
+
     private fun shoot(
         name: String,
         dark: Boolean,
@@ -104,7 +115,9 @@ class ScreenshotTest {
     ) {
         rule.setContent {
             HabitMinerTheme(darkTheme = dark, wallpaperColors = false) {
-                Surface(color = MaterialTheme.colorScheme.background) { content() }
+                androidx.compose.runtime.CompositionLocalProvider(com.habitminer.ui.design.LocalAppGuards provides guards) {
+                    Surface(color = MaterialTheme.colorScheme.background) { content() }
+                }
             }
         }
         rule.waitForIdle()
@@ -167,6 +180,7 @@ class ScreenshotTest {
                 todayMs = data.state.todayScreenTimeMs,
                 onChange = {},
                 onOpenApp = {},
+                today = java.time.LocalDate.of(2026, 10, 3),
             )
         }
 
@@ -267,6 +281,7 @@ class ScreenshotTest {
                 todayMs = data.state.todayScreenTimeMs,
                 onChange = {},
                 onOpenApp = {},
+                today = java.time.LocalDate.of(2026, 10, 3),
             )
         }
 
@@ -318,6 +333,67 @@ class ScreenshotTest {
         shoot("23_today_mood_daily", dark = true) {
             val state = data.state.copy(moodDue = true, insights = data.state.insights?.copy(naps = emptyList()))
             TodayScreen(state, NoActions, NoNav, now = data.now)
+        }
+
+    @Test
+    fun todayCaughtUp() =
+        shoot("24_today_caught_up", dark = false) {
+            val state = data.state.copy(widgetPrompt = true, insights = data.state.insights?.copy(naps = emptyList(), insight = null))
+            TodayScreen(state, NoActions, NoNav, dailyTargetMinutes = 240, now = data.now)
+        }
+
+    @Test
+    fun todayMorning() =
+        shoot("25_today_morning", dark = true) {
+            val wake = data.state.insights!!.lastNight!!.wakeTime
+            val state = data.state.copy(insights = data.state.insights?.copy(naps = emptyList(), insight = null))
+            TodayScreen(state, NoActions, NoNav, now = wake + 75 * 60_000L)
+        }
+
+    @Test
+    fun todayEvening() =
+        shoot("26_today_evening", dark = false) {
+            val state = data.state.copy(insights = data.state.insights?.copy(naps = emptyList(), insight = null))
+            TodayScreen(state, NoActions, NoNav, dailyTargetMinutes = 240, now = data.now + 3 * TimeUtil.HOUR)
+        }
+
+    @Test
+    fun todayAppInsight() =
+        shoot("27_today_app_insight", dark = true) {
+            val app = data.state.appSummaries.drop(2).first()
+            val insight =
+                com.habitminer.repository.TodayInsight(
+                    id = 2,
+                    key = "2026-10-03|APPS|APP_SPIKE|${app.appName}",
+                    family = com.habitminer.analytics.InsightFamily.APPS,
+                    title = "More ${app.appName} than usual",
+                    body = "1h 40m by 18:45, usually about 35 min by now. Mostly in the afternoon.",
+                    why = "Compared with your usual weekend days over the last four weeks, up to this time of day.",
+                    effect = 2.8f,
+                    open = "changes",
+                    notifiedAt = null,
+                    feedback = null,
+                    askFeedback = false,
+                )
+            val state = data.state.copy(insights = data.state.insights?.copy(naps = emptyList(), insight = insight))
+            TodayScreen(state, NoActions, NoNav, now = data.now)
+        }
+
+    @Test
+    fun mindfulPause() =
+        shoot("28_mindful_pause", dark = true) {
+            val app = data.state.appSummaries.first()
+            com.habitminer.mindful.PauseScreen(
+                pkg = app.packageName,
+                appName = app.appName,
+                seconds = 10,
+                reduced = true,
+                context = com.habitminer.analytics.PauseContext(visitsToday = 9, visitsLastHour = 6, usedTodayMs = 95 * 60_000L, usualVisitMs = 20 * 60_000L),
+                focusUntil = null,
+                onOpen = {},
+                onLeave = {},
+                onEndFocus = {},
+            )
         }
 
     /** Robolectric devices have no sensors; register the five the app uses. */

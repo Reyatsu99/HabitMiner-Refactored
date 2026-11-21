@@ -150,6 +150,8 @@ data class HabitUiState(
     val moodDue: Boolean = false,
     /** "Allow notifications?" on Today was answered with Not now. */
     val notificationAskDismissed: Boolean = false,
+    /** Offer to put the Today widget on the home screen (once, after two days, if none is placed). */
+    val widgetPrompt: Boolean = false,
     /** Notification access was skipped during setup (it can be turned on later from Status). */
     val notificationAccessSkipped: Boolean = false,
     /** Show the "bring your HabitMiner history" card on Today. */
@@ -325,6 +327,38 @@ class HabitViewModel
                 synchronizeUsageAndModel()
             }
             viewModelScope.launch(Dispatchers.IO) { syncHealthConnect(force = false) }
+            viewModelScope.launch { refreshWidgetPrompt() }
+        }
+
+        /** Whether to offer the home-screen widget: supported, none placed yet, never answered. */
+        private suspend fun refreshWidgetPrompt() {
+            val app = getApplication<Application>()
+            val prefs = app.getSharedPreferences(PrefsKeys.PREFS_NAME, Context.MODE_PRIVATE)
+            val show =
+                runCatching {
+                    !prefs.getBoolean(PrefsKeys.WIDGET_PROMPT_SEEN, false) &&
+                        prefs.getInt(PrefsKeys.DAYS_OF_DATA, 0) >= 2 &&
+                        android.appwidget.AppWidgetManager.getInstance(app).isRequestPinAppWidgetSupported &&
+                        androidx.glance.appwidget.GlanceAppWidgetManager(app).getGlanceIds(com.habitminer.widget.TodayWidget::class.java).isEmpty()
+                }.getOrDefault(false)
+            _uiState.update { it.copy(widgetPrompt = show) }
+        }
+
+        override fun pinWidget() {
+            val app = getApplication<Application>()
+            app.getSharedPreferences(PrefsKeys.PREFS_NAME, Context.MODE_PRIVATE).edit().putBoolean(PrefsKeys.WIDGET_PROMPT_SEEN, true).apply()
+            _uiState.update { it.copy(widgetPrompt = false) }
+            viewModelScope.launch {
+                runCatching {
+                    androidx.glance.appwidget.GlanceAppWidgetManager(app).requestPinGlanceAppWidget(com.habitminer.widget.TodayWidgetReceiver::class.java)
+                }
+            }
+        }
+
+        override fun dismissWidgetPrompt() {
+            getApplication<Application>().getSharedPreferences(PrefsKeys.PREFS_NAME, Context.MODE_PRIVATE).edit()
+                .putBoolean(PrefsKeys.WIDGET_PROMPT_SEEN, true).apply()
+            _uiState.update { it.copy(widgetPrompt = false) }
         }
 
         override fun loadHistoricalData() {

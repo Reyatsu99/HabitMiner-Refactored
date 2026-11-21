@@ -68,6 +68,8 @@ fun InsightPanel(
     justAnswered: Boolean = false,
     /** Put it away for the day. */
     onHide: () -> Unit = {},
+    /** (package, name) when the insight is about using one app more: offers a pause. */
+    guardApp: Pair<String?, String>? = null,
 ) {
     val haptic = rememberConfirmHaptic()
     val hue = LocalDataColors.current.nowHue
@@ -79,6 +81,10 @@ fun InsightPanel(
         Text(insight.body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(8.dp))
         Text("Why this: ${insight.why}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        guardApp?.let { (pkg, name) ->
+            Spacer(Modifier.height(10.dp))
+            com.habitminer.ui.design.GuardActions(pkg, name)
+        }
         Spacer(Modifier.height(12.dp))
         when {
             insight.feedback != null || justAnswered ->

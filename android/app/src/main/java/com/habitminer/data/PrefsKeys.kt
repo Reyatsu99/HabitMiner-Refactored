@@ -66,6 +66,7 @@ object PrefsKeys {
 
     /** "Allow notifications?" on Today was dismissed. */
     const val NOTIFICATION_ASK_DISMISSED = "notification_ask_dismissed"
+    const val WIDGET_PROMPT_SEEN = "widget_prompt_seen"
 
     // Insights and quiet hours
     const val INSIGHT_FREQUENCY = "insight_frequency"

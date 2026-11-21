@@ -1542,3 +1542,68 @@ class MoodScheduleTest {
         assertFalse(MoodSchedule.due(false, 20 * 60, false, false, at(day, 21, 0), ZONE))
     }
 }
+
+/** Day phase, pause context and goal weeks. */
+class DailyLoopsTest {
+    @Test
+    fun dayPhaseFollowsWakeAndUsualBedtime() {
+        val day = d(3)
+        val wake = at(day, 7, 0)
+        assertEquals(DayPhase.MORNING, DayPulse.phase(at(day, 8, 30), wake, -30, ZONE))
+        assertEquals(DayPhase.DAY, DayPulse.phase(at(day, 13, 0), wake, -30, ZONE))
+        // Asleep around 23:30: the wrap-up starts at 21:00.
+        assertEquals(DayPhase.DAY, DayPulse.phase(at(day, 20, 45), wake, -30, ZONE))
+        assertEquals(DayPhase.EVENING, DayPulse.phase(at(day, 21, 15), wake, -30, ZONE))
+        // An earlier sleeper (22:00) gets it from 19:30; a late one never later than 21:00.
+        assertEquals(DayPhase.EVENING, DayPulse.phase(at(day, 19, 45), wake, -120, ZONE))
+        assertEquals(DayPhase.EVENING, DayPulse.phase(at(day, 21, 5), wake, 90, ZONE))
+        // Unknown sleep: day until 21:00.
+        assertEquals(DayPhase.DAY, DayPulse.phase(at(day, 9, 0), null, null, ZONE))
+        assertEquals(DayPhase.EVENING, DayPulse.phase(at(day, 22, 0), null, null, ZONE))
+        assertEquals(23 * 60 + 30, DayPulse.clockMinute(-30))
+    }
+
+    @Test
+    fun pauseContextCountsVisitsAndTypicalLength() {
+        val today = d(8)
+        val sessions = mutableListOf<UsageSession>()
+        // Earlier days: a 20-minute visit around 10:30.
+        for (day in 1..5) sessions += s("Instagram", d(day), 10, 30, 20)
+        // Today: three visits in the last hour, the second split in two 30 s apart.
+        sessions += s("Instagram", today, 10, 0, 5)
+        val split = at(today, 10, 20)
+        sessions += UsageSession("pkg.instagram", "Instagram", AppCategory.SOCIAL, split, split + 2 * MIN, 2 * MIN)
+        sessions += UsageSession("pkg.instagram", "Instagram", AppCategory.SOCIAL, split + 2 * MIN + 30_000, split + 4 * MIN, 90_000)
+        sessions += s("Instagram", today, 10, 40, 5)
+        val c = PauseContext.build(sessions, at(today, 10, 50), ZONE)
+        assertEquals(4, c.visitsToday)
+        assertEquals(4, c.visitsLastHour)
+        assertEquals(20 * MIN, c.usualVisitMs)
+        val lines = c.lines("Instagram")
+        assertEquals("This is your 4th time in Instagram in the last hour.", lines[0])
+        assertTrue(lines[1].contains("20"))
+        // First visit of the day, no history: just the question.
+        val first = PauseContext.build(emptyList(), at(today, 10, 50), ZONE)
+        assertEquals(listOf("Is Instagram what you want right now?"), first.lines("Instagram"))
+    }
+
+    @Test
+    fun goalWeekCountsTheLastSevenDays() {
+        val today = d(10)
+        val target = 240 * MIN
+        val daily = (4..10).map { d(it) to if (it == 6) 0L else if (it % 2 == 0) 200 * MIN else 300 * MIN }
+        val days = GoalWeek.underTarget(daily, today, target)
+        assertEquals(7, days.size)
+        assertNull(days[2].met) // no data on day 6
+        assertTrue(days.last().today)
+        assertEquals(true, days.last().met) // 200 min so far today
+        assertEquals(3 to 6, GoalWeek.count(days))
+
+        val last14 = List(7) { 60f } + listOf(30f, 90f, 40f, 70f, 20f, 50f, 10f)
+        val less = GoalWeek.againstLastWeek(last14, today, more = false)
+        assertEquals(5 to 7, GoalWeek.count(less))
+        val more = GoalWeek.againstLastWeek(last14, today, more = true)
+        assertEquals(2 to 7, GoalWeek.count(more))
+        assertTrue(GoalWeek.againstLastWeek(List(14) { 0f }, today, more = false).isEmpty())
+    }
+}

@@ -79,6 +79,12 @@ interface HabitActions {
     /** "Not now" on the notification permission card. */
     fun dismissNotificationAsk() = Unit
 
+    /** Ask the launcher to place the Today widget. */
+    fun pinWidget() = Unit
+
+    /** "Not now" on the widget card. */
+    fun dismissWidgetPrompt() = Unit
+
     fun dismissWelcomeBack() = Unit
 
     fun downloadUpdate() = Unit

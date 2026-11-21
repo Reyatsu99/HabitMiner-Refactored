@@ -58,6 +58,7 @@ import com.habitminer.analytics.TimeUtil
 import com.habitminer.analytics.WeekComparison
 import com.habitminer.engine.AnalyticsMappers
 import com.habitminer.engine.HabitActions
+import com.habitminer.analytics.PatternGroup
 import com.habitminer.engine.HabitUiState
 import com.habitminer.ui.DeviationCard
 import com.habitminer.ui.Labels
@@ -287,6 +288,9 @@ private fun LazyListScope.overview(
             }
         }
     }
+    if (state.latestSensorContext != null || state.latestContext != null) {
+        item(key = "around") { com.habitminer.ui.today.AroundYou(state) }
+    }
     if (insights.contextInsights.isNotEmpty()) {
         item(key = "context-header") { SectionHeader("Patterns in your surroundings", icon = Icons.Rounded.Explore, iconColor = LocalDataColors.current.stepsHue.start) }
         item(key = "context") {
@@ -460,9 +464,19 @@ private fun LazyListScope.routines(state: HabitUiState) {
         item(key = "routines-empty") { Note("No strong routines yet. They appear once the same app sequence shows up on at least 5 days.") }
     } else {
         item(key = "routines") {
+            var open by remember { mutableStateOf<PatternGroup?>(null) }
             RowGroup {
-                groups.forEach { g -> row { ListRow(g.sequence, supporting = "${g.whenText}. ${g.evidenceText}, last seen ${Labels.shortDate(g.lastSeen)}") } }
+                groups.forEach { g ->
+                    row {
+                        ListRow(
+                            g.sequence,
+                            supporting = "${g.whenText}. ${g.evidenceText}, last seen ${Labels.shortDate(g.lastSeen)}",
+                            onClick = { open = g },
+                        )
+                    }
+                }
             }
+            open?.let { g -> RoutineSheet(g, state, onDismiss = { open = null }) }
         }
     }
 }
@@ -638,6 +652,40 @@ private fun HistoryDay(
                     supporting = "${Format.clock(session.start, zone)} to ${Format.clock(session.end, zone)}",
                     trailingText = Format.duration(session.totalMs),
                 )
+            }
+        }
+    }
+}
+
+/** A routine's apps, each with a one-tap pause for the ones you'd like to use less. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun RoutineSheet(
+    group: PatternGroup,
+    state: HabitUiState,
+    onDismiss: () -> Unit,
+) {
+    androidx.compose.material3.ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(modifier = Modifier.padding(start = ScreenPadding, end = ScreenPadding, bottom = 32.dp)) {
+            Text(group.sequence, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface)
+            Spacer(Modifier.height(4.dp))
+            Text("${group.whenText}. ${group.evidenceText}.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "A pause before one app in the chain is often enough to break it.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            group.apps.distinct().forEach { name ->
+                val pkg = com.habitminer.ui.today.appPackage(state, name)
+                Spacer(Modifier.height(16.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    com.habitminer.ui.design.AppIcon(pkg, name, size = 28.dp)
+                    Spacer(Modifier.width(10.dp))
+                    Text(name, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+                }
+                Spacer(Modifier.height(4.dp))
+                com.habitminer.ui.design.GuardActions(pkg, name)
             }
         }
     }
