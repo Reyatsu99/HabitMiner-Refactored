@@ -145,7 +145,7 @@
         <!-- Mindful pause (off until you turn it on in HabitMiner and in Accessibility settings). -->
         <service
             android:name=".mindful.MindfulPauseService"
-            android:exported="false"
+            android:exported="true"
             android:label="@string/mindful_label"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
