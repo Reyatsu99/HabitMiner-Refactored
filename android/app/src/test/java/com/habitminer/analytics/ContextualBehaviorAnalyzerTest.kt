@@ -108,13 +108,46 @@ class ContextualBehaviorAnalyzerTest {
                 sample.timestamp + minute, sample.timestamp + 6 * minute, 5 * minute,
             )
         }
-        val situations = listOf(
-            ContextSpan(SpanIndex.HEADPHONES, samples.first().timestamp, samples.last().timestamp),
-            ContextSpan(SpanIndex.VEHICLE, samples.first().timestamp, samples.last().timestamp),
-        )
-        val relationships = ContextualBehaviorAnalyzer.compute(sessions, samples, zone, situations)
+        val relationships = ContextualBehaviorAnalyzer.compute(sessions, samples, zone)
         assertTrue(relationships.none {
             it.dimension == ContextDimension.HEADPHONES || it.dimension == ContextDimension.VEHICLE
         })
     }
+    @Test
+    fun doesNotSpreadMergedSessionDurationAcrossUnobservedForegroundGaps() {
+        val sessions = mutableListOf<UsageSession>()
+        val samples = mutableListOf<ContextSample>()
+        val firstDay = LocalDate.of(2026, 10, 1)
+
+        repeat(6) { dayOffset ->
+            val date = firstDay.plusDays(dayOffset.toLong())
+            val observations = (0..8).map { index ->
+                val totalMinutes = 18 * 60 + index * 20
+                ContextSample(
+                    timestamp = TimeUtil.at(date, totalMinutes / 60, totalMinutes % 60, zone),
+                    lightLux = if (index % 2 == 0) 2f else 500f,
+                    motionVariance = 0.05f,
+                    isCharging = false,
+                    isScreenOn = true,
+                    proximityNear = null,
+                    batteryLevel = 60,
+                )
+            }
+            samples += observations
+
+            // Models a merged row: five minutes of wall time but only three minutes
+            // of foreground use, with a two-minute gap whose exact location is unknown.
+            listOf(0, 2, 4, 6, 1).forEach { index ->
+                val start = observations[index].timestamp + 5 * minute
+                sessions += UsageSession(
+                    "com.example.video", "Video", AppCategory.VIDEO,
+                    start, start + 5 * minute, 3 * minute,
+                )
+            }
+        }
+
+        // The previous proportional allocator fabricated use inside those unknown gaps.
+        assertTrue(ContextualBehaviorAnalyzer.compute(sessions, samples, zone).isEmpty())
+    }
+
 }
