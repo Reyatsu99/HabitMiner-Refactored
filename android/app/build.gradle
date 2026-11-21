@@ -16,7 +16,8 @@ android {
         applicationId "com.habitminer.extended"
         minSdk 26           // Android 8.0 — required for WorkManager background execution guarantees
         targetSdk 35
-        versionCode((project.findProperty("vcode") ?: "260").toString().toInteger())
+        // Keep development builds below the matching v2.6.0 release (20600), but above all v1.x releases.
+        versionCode((project.findProperty("vcode") ?: "20599").toString().toInteger())
         versionName((project.findProperty("vname") ?: "2.6.0-dev").toString())
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
