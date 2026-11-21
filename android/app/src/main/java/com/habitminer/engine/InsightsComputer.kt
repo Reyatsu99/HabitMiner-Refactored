@@ -323,7 +323,7 @@ class InsightsComputer
                 pickupsToday = pickups,
                 usualPickups = PickupAnalyzer.usualPerDay(unlocks, today, zone, excluded = excluded),
                 contextInsights = ContextInsights.compute(weekSessions, weekSamples, zone, activities = activities),
-                contextRelationships = ContextualBehaviorAnalyzer.compute(sessions, samples, zone, situations),
+                contextRelationships = ContextualBehaviorAnalyzer.compute(sessions, samples, zone),
                 heatmap = Heatmap.build(sessions, today, zone),
                 typicalDay = TypicalDay.build(sessions, today, now, zone, excluded),
                 dayTypes = DayTypeClusterer.cluster(sessions, today, zone),
