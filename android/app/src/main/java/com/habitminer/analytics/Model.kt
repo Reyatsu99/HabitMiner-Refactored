@@ -32,6 +32,25 @@ data class ContextSample(
     val recentSteps: Int? = null,
     /** Steps since the previous reading (screen on or off), or null when unknown. */
     val stepsSinceLast: Int? = null,
+    /** Additional accelerometer and gyroscope features retained from the Room snapshot. */
+    val accelMean: Float? = null,
+    val accelStd: Float? = null,
+    val accelMin: Float? = null,
+    val accelMax: Float? = null,
+    val accelEnergy: Float? = null,
+    val gyroMean: Float? = null,
+    val gyroVariance: Float? = null,
+    val gyroStd: Float? = null,
+    val gyroMin: Float? = null,
+    val gyroMax: Float? = null,
+    val gyroEnergy: Float? = null,
+    /** Device-health context recorded with the snapshot. */
+    val batteryTempC: Float? = null,
+    val powerSave: Boolean? = null,
+    val thermalStatus: Int? = null,
+    val unlockCount: Int? = null,
+    val notificationsLastHour: Int? = null,
+    val sensingMs: Long = 0L,
 )
 
 /** A notification or unlock event. */

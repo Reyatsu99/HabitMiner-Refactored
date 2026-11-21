@@ -4,6 +4,8 @@ import androidx.compose.runtime.Immutable
 import com.habitminer.analytics.AppCategory
 import com.habitminer.analytics.ContextInsight
 import com.habitminer.analytics.ContextInsights
+import com.habitminer.analytics.ContextRelationship
+import com.habitminer.analytics.ContextualBehaviorAnalyzer
 import com.habitminer.analytics.ContextSample
 import com.habitminer.analytics.DayTypeClusterer
 import com.habitminer.analytics.DailySleep
@@ -106,6 +108,8 @@ data class InsightsBundle(
     val patterns: List<com.habitminer.analytics.Pattern> = emptyList(),
     /** How each Use less app is going since you added it, by package. */
     val impacts: Map<String, com.habitminer.analytics.GoalImpact> = emptyMap(),
+    /** Exposure-adjusted app/context associations over the full analysis window. */
+    val contextRelationships: List<ContextRelationship> = emptyList(),
 ) {
     /** Today's sleep: the night that ended this morning plus today's confirmed naps. */
     val sleepToday: DailySleep? get() = sleepDays.lastOrNull()?.takeIf { it.date == java.time.Instant.ofEpochMilli(computedAt).atZone(ZoneId.systemDefault()).toLocalDate() }
@@ -319,6 +323,7 @@ class InsightsComputer
                 pickupsToday = pickups,
                 usualPickups = PickupAnalyzer.usualPerDay(unlocks, today, zone, excluded = excluded),
                 contextInsights = ContextInsights.compute(weekSessions, weekSamples, zone, activities = activities),
+                contextRelationships = ContextualBehaviorAnalyzer.compute(sessions, samples, zone, situations),
                 heatmap = Heatmap.build(sessions, today, zone),
                 typicalDay = TypicalDay.build(sessions, today, now, zone, excluded),
                 dayTypes = DayTypeClusterer.cluster(sessions, today, zone),

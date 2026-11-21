@@ -34,6 +34,23 @@ object AnalyticsMappers {
             place = e.wifiPlace,
             recentSteps = e.recentSteps.takeIf { it >= 0 },
             stepsSinceLast = e.stepsSinceLastSnapshot.takeIf { it >= 0 },
+            accelMean = e.accelMean.takeIf { it >= 0f && it.isFinite() },
+            accelStd = e.accelStd.takeIf { it >= 0f && it.isFinite() },
+            accelMin = e.accelMin.takeIf { it >= 0f && it.isFinite() },
+            accelMax = e.accelMax.takeIf { it >= 0f && it.isFinite() },
+            accelEnergy = e.accelEnergy.takeIf { it >= 0f && it.isFinite() },
+            gyroMean = e.gyroMean.takeIf { it >= 0f && it.isFinite() },
+            gyroVariance = e.gyroVariance.takeIf { it >= 0f && it.isFinite() },
+            gyroStd = e.gyroStd.takeIf { it >= 0f && it.isFinite() },
+            gyroMin = e.gyroMin.takeIf { it >= 0f && it.isFinite() },
+            gyroMax = e.gyroMax.takeIf { it >= 0f && it.isFinite() },
+            gyroEnergy = e.gyroEnergy.takeIf { it >= 0f && it.isFinite() },
+            batteryTempC = e.batteryTempC?.takeIf { it.isFinite() },
+            powerSave = e.powerSave,
+            thermalStatus = e.thermalStatus?.takeIf { it in 0..6 },
+            unlockCount = e.unlockCount.takeIf { it >= 0 },
+            notificationsLastHour = e.notificationsLastHour.takeIf { it >= 0 },
+            sensingMs = e.sensingMs.coerceAtLeast(0L),
         )
 
     /**

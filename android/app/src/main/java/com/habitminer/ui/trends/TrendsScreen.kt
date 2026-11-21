@@ -332,6 +332,29 @@ private fun LazyListScope.overview(
             RowGroup { insights.contextInsights.forEach { c -> row { ListRow(c.headline, supporting = c.detail) } } }
         }
     }
+    if (insights.contextRelationships.isNotEmpty()) {
+        item(key = "context-relationships-header") {
+            SectionHeader(
+                "App use by context",
+                icon = Icons.Rounded.Explore,
+                iconColor = LocalDataColors.current.stepsHue.start,
+                info = "Rates are adjusted for sampled screen-on exposure and compared within the same weekday/weekend and three-hour time windows. Sparse periods are left out; these are associations, not causes.",
+            )
+        }
+        item(key = "context-relationships") {
+            RowGroup {
+                insights.contextRelationships.forEach { relationship ->
+                    row {
+                        ListRow(
+                            relationship.headline,
+                            supporting = relationship.detail,
+                            maxSupportingLines = 4,
+                        )
+                    }
+                }
+            }
+        }
+    }
 }
 
 private fun weekLine(week: WeekComparison): String {
