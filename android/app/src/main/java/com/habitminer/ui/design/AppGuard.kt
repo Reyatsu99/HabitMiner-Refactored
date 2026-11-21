@@ -33,8 +33,13 @@ data class AppGuards(
     val pauseEnabled: Boolean,
     /** Its accessibility service is on in Android's settings (needed for it to work). */
     val serviceOn: Boolean,
-    /** Put the app on Use less; with [pause], also switch the mindful pause on. */
-    val onGuard: (packageName: String, pause: Boolean) -> Unit,
+    /** Apps paused only at night, from this minute of the day. */
+    val pauseFrom: Map<String, Int> = emptyMap(),
+    /**
+     * Put the app on Use less; with [pause], also switch the mindful pause on, and with a
+     * night start (minute of the day) pause it only from then until 05:00.
+     */
+    val onGuard: (packageName: String, pause: Boolean, nightFrom: Int?) -> Unit,
     val onOpenGoals: () -> Unit,
 ) {
     val pauseWorks: Boolean get() = pauseEnabled && serviceOn
@@ -52,6 +57,8 @@ fun GuardActions(
     packageName: String?,
     appName: String,
     modifier: Modifier = Modifier,
+    /** Suggest pausing only at night, from this minute of the day. */
+    nightFrom: Int? = null,
 ) {
     val guards = LocalAppGuards.current ?: return
     if (packageName == null) return
@@ -59,8 +66,13 @@ fun GuardActions(
     val listed = packageName in guards.useLess
     if (!listed) {
         Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            HueTonalButton("Pause before $appName", hue, { guards.onGuard(packageName, true) })
-            TextButton(onClick = { guards.onGuard(packageName, false) }) { Text("Use less", color = hue.text) }
+            if (nightFrom != null) {
+                HueTonalButton("Pause after ${com.habitminer.analytics.Format.clockFromMinutes(nightFrom)}", hue, { guards.onGuard(packageName, true, nightFrom) })
+                TextButton(onClick = { guards.onGuard(packageName, true, null) }) { Text("Always", color = hue.text) }
+            } else {
+                HueTonalButton("Pause before $appName", hue, { guards.onGuard(packageName, true, null) })
+                TextButton(onClick = { guards.onGuard(packageName, false, null) }) { Text("Use less", color = hue.text) }
+            }
         }
         return
     }
@@ -69,7 +81,7 @@ fun GuardActions(
         Spacer(Modifier.width(6.dp))
         Text(
             when {
-                guards.pauseWorks -> "Pause on before $appName"
+                guards.pauseWorks -> guards.pauseFrom[packageName]?.let { "Pause on for $appName after ${com.habitminer.analytics.Format.clockFromMinutes(it)}" } ?: "Pause on before $appName"
                 guards.pauseEnabled -> "On Use less; the pause needs Accessibility"
                 else -> "On your Use less list"
             },
@@ -80,9 +92,9 @@ fun GuardActions(
         if (guards.pauseWorks) {
             TextButton(onClick = guards.onOpenGoals) { Text("Edit", color = hue.text) }
         } else if (guards.pauseEnabled) {
-            TextButton(onClick = { guards.onGuard(packageName, true) }) { Text("Turn on", color = hue.text) }
+            TextButton(onClick = { guards.onGuard(packageName, true, guards.pauseFrom[packageName]) }) { Text("Turn on", color = hue.text) }
         } else {
-            TextButton(onClick = { guards.onGuard(packageName, true) }) { Text("Add a pause", color = hue.text) }
+            TextButton(onClick = { guards.onGuard(packageName, true, nightFrom) }) { Text("Add a pause", color = hue.text) }
         }
     }
 }

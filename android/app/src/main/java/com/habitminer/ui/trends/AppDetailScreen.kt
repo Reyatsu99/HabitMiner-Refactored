@@ -85,7 +85,7 @@ fun AppDetailContent(
                 item(key = "empty") {
                     EmptyState("No recent use", "This app hasn't been used in the last five weeks, so there's nothing to show yet.")
                 }
-            else -> detail(d, state.routines)
+            else -> detail(d, state.routines, state.hook)
         }
     }
 }
@@ -93,6 +93,7 @@ fun AppDetailContent(
 private fun androidx.compose.foundation.lazy.LazyListScope.detail(
     d: AppDetail,
     routines: List<String>,
+    hook: com.habitminer.analytics.AppHook?,
 ) {
     item(key = "hero") {
         Column(modifier = Modifier.padding(horizontal = ScreenPadding, vertical = 12.dp)) {
@@ -137,22 +138,65 @@ private fun androidx.compose.foundation.lazy.LazyListScope.detail(
     }
     item(key = "grid") { WeekdayHourGrid(d.weekdayHour) }
     d.busiestHour?.let { h -> item(key = "busiest") { Note("Most often around ${Format.hourRange(h)}.") } }
-    item(key = "why-header") { SectionHeader("What brings you here", icon = androidx.compose.material.icons.Icons.Rounded.NotificationsActive, iconColor = LocalDataColors.current.notificationsHue.start) }
+    item(key = "why-header") {
+        SectionHeader(
+            "How it hooks you",
+            icon = androidx.compose.material.icons.Icons.Rounded.NotificationsActive,
+            iconColor = LocalDataColors.current.notificationsHue.start,
+            info =
+                "From your last five weeks. A visit is one stretch in the app (breaks under a minute don't count). " +
+                    "\"Right before\" and \"next\" mean within two minutes.",
+        )
+    }
     item(key = "why") {
         RowGroup {
-            row {
-                ListRow(
-                    "Opened right after its notification",
-                    supporting = "Within a minute of a notification from ${d.appName}",
-                    trailingText = if (d.opens > 0) Format.percent(d.opensAfterNotification.toFloat() / d.opens) else "–",
-                )
+            hook?.let { h ->
+                row {
+                    ListRow(
+                        "Quick checks",
+                        supporting = "Visits under 2 minutes, about ${Math.round(h.quickPerDay)} a day",
+                        trailingText = Format.percent(h.quickShare),
+                    )
+                }
+                row {
+                    ListRow(
+                        "Long sessions",
+                        supporting =
+                            if (h.longPerDay < 0.1f) {
+                                "Hardly ever 15 minutes or more"
+                            } else {
+                                "15 minutes or more, ${String.format(java.util.Locale.US, "%.1f", h.longPerDay)} a day, ${Format.percent(h.longTimeShare)} of its time" +
+                                    (h.longPeakHour?.let { ph -> ". Mostly ${Format.clockFromMinutes(ph * 60)} to ${Format.clockFromMinutes((ph + 3) * 60)}" } ?: "")
+                            },
+                        trailingText = if (h.longPerDay < 0.1f) "–" else Format.percent(h.longTimeShare),
+                    )
+                }
+                if (h.from.isNotEmpty()) {
+                    row {
+                        ListRow(
+                            "Right before",
+                            supporting = h.from.joinToString(", ") { (app, share) -> "$app ${Format.percent(share)}" },
+                        )
+                    }
+                }
             }
             row {
                 ListRow(
-                    "Notifications",
-                    supporting = if (d.notifications == 0) "None recorded (needs notification access)" else "In the last five weeks",
-                    trailingText = "${d.notifications}",
+                    "Opened right after its notification",
+                    supporting = if (d.notifications == 0) "None recorded (needs notification access)" else "Within a minute of one of its ${d.notifications} notifications",
+                    trailingText = if (d.opens > 0) Format.percent(d.opensAfterNotification.toFloat() / d.opens) else "–",
                 )
+            }
+            hook?.afterUnlockShare?.let { u ->
+                row { ListRow("First app after unlocking", supporting = "Straight after you unlocked the phone", trailingText = Format.percent(u)) }
+            }
+            hook?.takeIf { it.next.isNotEmpty() }?.let { h ->
+                row {
+                    ListRow(
+                        "Where you go next",
+                        supporting = h.next.joinToString(", ") { (app, share) -> "$app ${Format.percent(share)}" },
+                    )
+                }
             }
         }
     }

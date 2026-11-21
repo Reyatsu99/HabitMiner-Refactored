@@ -4,6 +4,7 @@
 package com.habitminer.ui.trends
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.AutoStories
 import androidx.compose.material.icons.rounded.SwapVert
 import androidx.compose.material.icons.rounded.ShowChart
@@ -103,6 +104,7 @@ fun TrendsScreen(
     onOpenApp: (String) -> Unit,
     modifier: Modifier = Modifier,
     onOpenStory: () -> Unit = {},
+    onOpenSleep: () -> Unit = {},
 ) {
     var tab by rememberSaveable(initialTab) { mutableStateOf(initialTab) }
     Column(modifier = modifier.fillMaxSize()) {
@@ -134,7 +136,7 @@ fun TrendsScreen(
                 item(key = "loading") { Skeleton() }
             } else {
                 when (tab) {
-                    TrendsTab.OVERVIEW -> overview(state, onOpenStory)
+                    TrendsTab.OVERVIEW -> overview(state, onOpenStory, onOpenSleep)
                     TrendsTab.APPS -> apps(state, onOpenApp)
                     TrendsTab.ROUTINES -> routines(state)
                     TrendsTab.CHANGES -> changes(state, actions)
@@ -152,8 +154,31 @@ fun TrendsScreen(
 private fun LazyListScope.overview(
     state: HabitUiState,
     onOpenStory: () -> Unit,
+    onOpenSleep: () -> Unit,
 ) {
     val insights = state.insights ?: return
+    item(key = "patterns-header") {
+        SectionHeader(
+            "Your patterns",
+            icon = Icons.Rounded.AutoAwesome,
+            iconColor = LocalDataColors.current.freeHue.start,
+            info =
+                "Found in your last four weeks of data. Each one shows only when it clearly holds for you, with the numbers behind it; " +
+                    "\"This week\" ones compare the last 7 days with the 7 before and change as you go.",
+        )
+    }
+    if (insights.patterns.isEmpty()) {
+        item(key = "patterns-empty") {
+            Note("Nothing stands out clearly yet. Patterns appear once there's enough of your own data to be sure, usually within one to two weeks.")
+        }
+    } else {
+        insights.patterns.forEach { p ->
+            item(key = "pattern-${p.key}") {
+                com.habitminer.ui.design.PatternCard(p, onOpenSleep = onOpenSleep)
+                Spacer(Modifier.height(10.dp))
+            }
+        }
+    }
     insights.week?.let { week ->
         item(key = "week-hero") {
             Column(modifier = Modifier.padding(horizontal = ScreenPadding, vertical = 8.dp)) {

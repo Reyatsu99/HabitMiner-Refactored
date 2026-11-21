@@ -1607,3 +1607,113 @@ class DailyLoopsTest {
         assertTrue(GoalWeek.againstLastWeek(List(14) { 0f }, today, more = false).isEmpty())
     }
 }
+
+/** Patterns, app hooks and goal impact. */
+class PatternsTest {
+    private fun find(
+        sessions: List<UsageSession>,
+        today: LocalDate,
+        notes: List<NotificationEvent> = emptyList(),
+    ) = PatternFinder.find(sessions, notes, emptyList(), emptyList(), today, at(today, 10, 0), ZONE)
+
+    @Test
+    fun longSessionsAfterMidnightSuggestANightPause() {
+        val sessions = mutableListOf<UsageSession>()
+        for (day in 1..10) {
+            sessions += s("YT", d(day), 0, 30, 40, AppCategory.VIDEO)
+            for (k in 0 until 6) sessions += s("YT", d(day), 13, k * 10, 1, AppCategory.VIDEO)
+        }
+        val p = find(sessions, d(11)).first { it.kind == PatternKind.LONG_SESSIONS }
+        assertEquals("pkg.yt", p.packageName)
+        assertEquals(PatternAction.PAUSE_APP_AT_NIGHT, p.action)
+        assertEquals(23 * 60, p.nightFromMinute)
+        assertTrue(p.title, p.title.startsWith("One long YT session a day makes up 8"))
+        assertTrue(p.detail.contains("between 00:00 and 03:00"))
+    }
+
+    @Test
+    fun quietAppsAndShortHistoriesShowNothing() {
+        val sessions = (1..4).map { s("YT", d(it), 0, 30, 40, AppCategory.VIDEO) }
+        assertTrue(find(sessions, d(5)).none { it.kind == PatternKind.LONG_SESSIONS })
+    }
+
+    @Test
+    fun weekAgainstTheWeekBefore() {
+        val sessions = (1..14).map { day -> s("YT", d(day), 20, 0, if (day <= 7) 180 else 60, AppCategory.VIDEO) }
+        val ps = find(sessions, d(15))
+        val week = ps.first { it.kind == PatternKind.WEEK_CHANGE }
+        assertTrue(week.good)
+        assertEquals("This week: 2h a day less than the week before", week.title)
+        val app = ps.first { it.kind == PatternKind.APP_WEEK_CHANGE }
+        assertEquals("YT down 66% this week", app.title)
+        assertTrue(app.fresh)
+    }
+
+    @Test
+    fun oneAppLeadingIntoAnother() {
+        val sessions = mutableListOf<UsageSession>()
+        for (k in 0 until 40) {
+            val day = d(1 + k % 10)
+            sessions += s("WhatsApp", day, 9 + k / 10, 0, 1, AppCategory.MESSAGING)
+            sessions += s("Instagram", day, 9 + k / 10, 2, 3, AppCategory.SOCIAL)
+        }
+        val p = find(sessions, d(11)).first { it.kind == PatternKind.LEAD_IN }
+        assertEquals("pkg.instagram", p.packageName)
+        assertEquals("100% of your Instagram opens come right after WhatsApp", p.title)
+        val hook = PatternFinder.hook("pkg.instagram", sessions, emptyList(), emptyList(), ZONE)!!
+        assertEquals("WhatsApp", hook.from.first().first)
+        assertEquals(0f, hook.quickShare, 0.001f)
+        assertNull(hook.afterUnlockShare)
+    }
+
+    @Test
+    fun notificationsThatPullYouIn() {
+        val sessions = mutableListOf<UsageSession>()
+        val notes = mutableListOf<NotificationEvent>()
+        for (k in 0 until 25) {
+            val day = d(1 + k % 10)
+            // A game notification, opened within the minute, and then 20 minutes in it.
+            val start = at(day, 8 + k / 10, 0)
+            notes += NotificationEvent(start - 30_000, "pkg.game")
+            sessions += UsageSession("pkg.game", "Game", AppCategory.GAMES, start, start + (if (k % 2 == 0) 20 else 1) * MIN, (if (k % 2 == 0) 20 else 1) * MIN)
+        }
+        // Plenty of short phone use that didn't start with a notification.
+        for (k in 0 until 60) sessions += s("Chat", d(1 + k % 10), 14 + k / 10, 0, 2, AppCategory.MESSAGING)
+        val p = find(sessions, d(11), notes).first { it.kind == PatternKind.NOTIFICATION_PULL }
+        assertEquals("pkg.game", p.packageName)
+        assertEquals(PatternAction.APP_NOTIFICATIONS, p.action)
+        assertTrue(p.detail, p.detail.contains("52% of the time (13 of 25)"))
+    }
+
+    @Test
+    fun goalImpactAgainstTheUsualFourWeeks() {
+        val since = at(d(30), 12, 0)
+        val daily = HashMap<LocalDate, Long>()
+        for (k in 2..29) daily[d(30).minusDays(k.toLong())] = 60 * MIN
+        // The day before it was set was a spike: left out of "usual".
+        daily[d(29)] = 300 * MIN
+        for (k in 1..6) daily[d(30).plusDays(k.toLong())] = 30 * MIN
+        val pauses = List(10) { (since + it * TimeUtil.HOUR) to if (it < 7) "left" else "opened" }
+        val im = PatternFinder.impact("pkg.yt", since, pauses, daily, d(37), ZONE)
+        assertEquals(6, im.days)
+        assertEquals(7, im.closed)
+        assertEquals(3, im.openedAnyway)
+        assertEquals(60 * MIN, im.beforePerDayMs)
+        assertEquals(30 * MIN, im.afterPerDayMs)
+        assertEquals("You closed YT at 7 of 10 pauses; 30m a day, 30m less than your usual 1h.", im.summary("YT"))
+        val early = PatternFinder.impact("pkg.yt", since, emptyList(), daily, d(32), ZONE)
+        assertTrue(early.tooEarly)
+        assertEquals("A fair comparison needs 5 full days (1 so far).", early.summary("YT"))
+    }
+
+    @Test
+    fun nightWindow() {
+        assertTrue(NightWindow.contains(23 * 60 + 30, 23 * 60))
+        assertTrue(NightWindow.contains(2 * 60, 23 * 60))
+        assertFalse(NightWindow.contains(6 * 60, 23 * 60))
+        assertFalse(NightWindow.contains(22 * 60, 23 * 60))
+        assertTrue(NightWindow.contains(30, 0))
+        assertFalse(NightWindow.contains(23 * 60, 0))
+    }
+}
+

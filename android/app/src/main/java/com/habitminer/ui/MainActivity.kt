@@ -226,8 +226,15 @@ class MainActivity : ComponentActivity() {
                 useLess = goals.useLess.toSet(),
                 pauseEnabled = pauseEnabled,
                 serviceOn = serviceOn,
-                onGuard = { pkg, pause ->
-                    goalsStore.update { g -> g.copy(useLess = (g.useLess - pkg) + pkg, useMore = g.useMore - pkg) }
+                pauseFrom = goals.pauseFrom,
+                onGuard = { pkg, pause, nightFrom ->
+                    goalsStore.update { g ->
+                        g.copy(
+                            useLess = (g.useLess - pkg) + pkg,
+                            useMore = g.useMore - pkg,
+                            pauseFrom = if (nightFrom != null) g.pauseFrom + (pkg to nightFrom) else if (pause) g.pauseFrom - pkg else g.pauseFrom,
+                        )
+                    }
                     if (pause) {
                         com.habitminer.mindful.MindfulPause.setEnabled(this, true)
                         if (!com.habitminer.mindful.MindfulPause.serviceOn(this)) {
@@ -281,6 +288,8 @@ class MainActivity : ComponentActivity() {
                             override fun openApp(packageName: String) = nav.openApp(packageName)
 
                             override fun pickImportFile() = importLauncher.launch(IMPORT_TYPES)
+
+                            override fun openPatterns() = nav.goTab("${Tab.TRENDS.route}?tab=${TrendsTab.OVERVIEW.name}")
                         },
                         intention = goals.intentionFor(java.time.LocalDate.now()),
                         dailyTargetMinutes = goals.dailyTargetMinutes,
@@ -297,7 +306,14 @@ class MainActivity : ComponentActivity() {
                         ),
                 ) { backStack ->
                     val tab = runCatching { TrendsTab.valueOf(backStack.arguments?.getString("tab") ?: "") }.getOrDefault(TrendsTab.OVERVIEW)
-                    TrendsScreen(state, viewModel, initialTab = tab, onOpenApp = { nav.openApp(it) }, onOpenStory = { nav.navigate(ROUTE_STORY) { launchSingleTop = true } })
+                    TrendsScreen(
+                        state,
+                        viewModel,
+                        initialTab = tab,
+                        onOpenApp = { nav.openApp(it) },
+                        onOpenStory = { nav.navigate(ROUTE_STORY) { launchSingleTop = true } },
+                        onOpenSleep = { nav.goTab(Tab.SLEEP.route) },
+                    )
                 }
                 composable(Tab.SLEEP.route) { SleepScreen(state, viewModel) }
                 composable(Tab.GOALS.route) {
@@ -306,6 +322,7 @@ class MainActivity : ComponentActivity() {
                         apps = state.appSummaries,
                         dailyTotals = state.dailyTotals,
                         todayMs = state.todayScreenTimeMs,
+                        impacts = state.insights?.impacts.orEmpty(),
                         onChange = { change -> goalsStore.update(change) },
                         onOpenApp = { nav.openApp(it) },
                     )

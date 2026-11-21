@@ -6,6 +6,7 @@ package com.habitminer.ui.goals
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Insights
 import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material.icons.rounded.TrendingDown
 import androidx.compose.material.icons.rounded.TrendingUp
@@ -31,6 +32,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.Icon
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -78,6 +80,8 @@ fun GoalsScreen(
     onOpenApp: (String) -> Unit,
     modifier: Modifier = Modifier,
     today: LocalDate = LocalDate.now(),
+    /** How each Use less app is going since it was added. */
+    impacts: Map<String, com.habitminer.analytics.GoalImpact> = emptyMap(),
 ) {
     var picking by rememberSaveable { mutableStateOf<String?>(null) } // "less" or "more"
     val byPackage = remember(apps) { apps.associateBy { it.packageName } }
@@ -121,7 +125,7 @@ fun GoalsScreen(
             if (goals.useLess.isEmpty()) {
                 Note("Pick apps you'd like to spend less time in. You'll see how this week compares with last week.")
             } else {
-                AppGoalRows(goals.useLess, byPackage, less = true, today = today, onOpenApp = onOpenApp)
+                AppGoalRows(goals.useLess, byPackage, less = true, today = today, impacts = impacts, onOpenApp = onOpenApp)
             }
         }
 
@@ -298,6 +302,7 @@ private fun AppGoalRows(
     less: Boolean,
     today: LocalDate,
     onOpenApp: (String) -> Unit,
+    impacts: Map<String, com.habitminer.analytics.GoalImpact> = emptyMap(),
 ) {
     RowGroup {
         packages.forEach { pkg ->
@@ -324,6 +329,24 @@ private fun AppGoalRows(
                     )
                     if (days.isNotEmpty()) {
                         GoalDots(days, labels = false, modifier = Modifier.padding(start = 68.dp, bottom = 12.dp))
+                    }
+                    impacts[pkg]?.let { im ->
+                        val good = !im.tooEarly && im.afterPerDayMs != null && im.beforePerDayMs != null && im.afterPerDayMs < im.beforePerDayMs
+                        Row(modifier = Modifier.padding(start = 68.dp, end = 16.dp, bottom = 14.dp), verticalAlignment = Alignment.Top) {
+                            Icon(
+                                Icons.Rounded.Insights,
+                                contentDescription = null,
+                                tint = if (good) LocalDataColors.current.goodHue.text else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(16.dp).padding(top = 2.dp),
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                "Since ${java.time.Instant.ofEpochMilli(im.since).atZone(java.time.ZoneId.systemDefault()).toLocalDate().format(java.time.format.DateTimeFormatter.ofPattern("d MMM"))}: " +
+                                    im.summary(a?.appName ?: "it").replaceFirstChar { it.lowercase() },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
             }

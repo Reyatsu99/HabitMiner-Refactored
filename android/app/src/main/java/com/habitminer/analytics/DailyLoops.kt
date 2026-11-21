@@ -167,3 +167,18 @@ object GoalWeek {
         value: (LocalDate) -> T?,
     ): List<Pair<LocalDate, T?>> = (6 downTo 0).map { today.minusDays(it.toLong()) }.map { it to value(it) }
 }
+
+/** A pause that only applies at night: from a minute of the evening (or after midnight) until 05:00. */
+object NightWindow {
+    const val END_MINUTE = 5 * 60
+
+    fun contains(
+        minute: Int,
+        from: Int,
+    ): Boolean =
+        if (from >= END_MINUTE) {
+            minute >= from || minute < END_MINUTE
+        } else {
+            minute in from until END_MINUTE
+        }
+}

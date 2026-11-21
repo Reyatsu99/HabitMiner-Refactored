@@ -26,7 +26,13 @@ class MindfulPauseService : AccessibilityService() {
         val previous = foreground
         foreground = pkg
         if (pkg == previous) return
-        if (!MindfulPause.enabled(this) || pkg !in goalsStore.goals.value.useLess) return
+        val goals = goalsStore.goals.value
+        if (!MindfulPause.enabled(this) || pkg !in goals.useLess) return
+        // Paused only at night for this app: from its start minute until 05:00.
+        goals.pauseFrom[pkg]?.let { from ->
+            val minute = java.time.LocalTime.now().let { it.hour * 60 + it.minute }
+            if (!com.habitminer.analytics.NightWindow.contains(minute, from)) return
+        }
         val allowedAt = allowed[pkg] ?: 0L
         if (System.currentTimeMillis() - allowedAt < MindfulPause.GRACE_MS) return
         startActivity(

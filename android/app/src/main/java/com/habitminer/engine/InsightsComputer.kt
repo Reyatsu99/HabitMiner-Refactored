@@ -102,6 +102,10 @@ data class InsightsBundle(
     val mood: com.habitminer.analytics.MoodPattern? = null,
     /** Pickups on a usual day (median of recent days), for Today's ring. */
     val usualPickups: Int? = null,
+    /** What's true about how you use your phone, strongest first (see [com.habitminer.analytics.PatternFinder]). */
+    val patterns: List<com.habitminer.analytics.Pattern> = emptyList(),
+    /** How each Use less app is going since you added it, by package. */
+    val impacts: Map<String, com.habitminer.analytics.GoalImpact> = emptyMap(),
 ) {
     /** Today's sleep: the night that ended this morning plus today's confirmed naps. */
     val sleepToday: DailySleep? get() = sleepDays.lastOrNull()?.takeIf { it.date == java.time.Instant.ofEpochMilli(computedAt).atZone(ZoneId.systemDefault()).toLocalDate() }
@@ -118,6 +122,7 @@ class InsightsComputer
         private val routineAnalysis: RoutineAnalysis,
         private val calendarBusy: com.habitminer.sources.CalendarBusy,
         private val insightRepository: com.habitminer.repository.InsightRepository,
+        private val goalsStore: com.habitminer.goals.GoalsStore,
     ) {
         suspend fun compute(
             allUsage: List<AppUsageEntity>,
@@ -245,6 +250,40 @@ class InsightsComputer
                 )
             val insight = runCatching { insightRepository.todaysInsight(candidates, today, now) }.getOrNull()
 
+            val patterns =
+                runCatching {
+                    com.habitminer.analytics.PatternFinder.find(sessions, notificationEvents, unlocks, routine.nights, today, now, zone)
+                }.getOrDefault(emptyList())
+            // Use less apps: pauses answered and time against before.
+            val goals = goalsStore.goals.value
+            val impacts =
+                runCatching {
+                    if (goals.since.isEmpty()) {
+                        emptyMap()
+                    } else {
+                        val pauses =
+                            contextRepository.getDeviceEventsSince(DeviceEvents.MINDFUL_PAUSE, horizon).mapNotNull { e ->
+                                val pkg = e.packageName ?: return@mapNotNull null
+                                val focus = DeviceEvents.detailValue(e.detail, "focus") == "true"
+                                if (focus) null else Triple(pkg, e.timestamp, DeviceEvents.detailValue(e.detail, "outcome") ?: "")
+                            }
+                        goals.since.mapValues { (pkg, since) ->
+                            val daily = HashMap<java.time.LocalDate, Long>()
+                            // Every day with any data counts (as 0 for this app), so quiet days aren't lost.
+                            sessions.forEach { daily.putIfAbsent(TimeUtil.dateOf(it.start, zone), 0L) }
+                            sessions.filter { it.packageName == pkg }.forEach { daily.merge(TimeUtil.dateOf(it.start, zone), it.durationMs, Long::plus) }
+                            com.habitminer.analytics.PatternFinder.impact(
+                                pkg,
+                                since,
+                                pauses.filter { it.first == pkg }.map { it.second to it.third },
+                                daily,
+                                today,
+                                zone,
+                            )
+                        }
+                    }
+                }.getOrDefault(emptyMap())
+
             return InsightsBundle(
                 computedAt = now,
                 todayByCategory = SessionGrouper.byCategory(todaySessions),
@@ -275,6 +314,8 @@ class InsightsComputer
                 sleepShift = routine.sleepShift,
                 insight = insight,
                 coverage = coverage,
+                patterns = patterns,
+                impacts = impacts,
                 mood =
                     com.habitminer.analytics.MoodPatterns.compute(
                         labels.filter { it.kind == UserLabelEntity.KIND_MOOD }.mapNotNull { com.habitminer.analytics.MoodPatterns.parse(it.timestamp, it.value) },

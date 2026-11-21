@@ -25,6 +25,8 @@ data class AppDetailState(
     val detail: AppDetail? = null,
     /** Routines (app sequences) this app is part of. */
     val routines: List<String> = emptyList(),
+    /** How you get to the app, how long you stay and where you go next. */
+    val hook: com.habitminer.analytics.AppHook? = null,
 )
 
 /** One app's page: loaded once when opened, from the last five weeks. */
@@ -35,6 +37,7 @@ class AppDetailViewModel
         savedState: SavedStateHandle,
         private val contextRepository: ContextRepository,
         private val habitRepository: HabitRepository,
+        private val appIdentityResolver: com.habitminer.domain.AppIdentityResolver,
     ) : ViewModel() {
         val packageName: String = savedState.get<String>(ARG_PACKAGE).orEmpty()
 
@@ -58,7 +61,17 @@ class AppDetailViewModel
                             .distinct()
                             .take(4)
                     }
+                // Shown first, then the slower look at what comes before and after it.
                 emit(AppDetailState(loading = false, detail = detail, routines = routines))
+                val hook =
+                    runCatching {
+                        val all =
+                            contextRepository.getUsageSince(since)
+                                .filterNot { appIdentityResolver.isLauncher(it.packageName) }
+                                .map(AnalyticsMappers::session)
+                        com.habitminer.analytics.PatternFinder.hook(packageName, all, notes, contextRepository.unlockTimesSince(since), zone)
+                    }.getOrNull()
+                emit(AppDetailState(loading = false, detail = detail, routines = routines, hook = hook))
             }.flowOn(Dispatchers.Default)
                 .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AppDetailState())
 

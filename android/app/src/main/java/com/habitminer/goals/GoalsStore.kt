@@ -22,6 +22,10 @@ data class Goals(
     /** Today's intention, a short sentence, and the day it was set. */
     val intention: String? = null,
     val intentionDate: LocalDate? = null,
+    /** When each Use less app was added, to show whether it's working. */
+    val since: Map<String, Long> = emptyMap(),
+    /** Use less apps paused only at night: from this minute of the day until 05:00. */
+    val pauseFrom: Map<String, Int> = emptyMap(),
 ) {
     fun intentionFor(day: LocalDate): String? = intention?.takeIf { intentionDate == day }
 }
@@ -37,7 +41,14 @@ class GoalsStore
         val goals: StateFlow<Goals> = _goals.asStateFlow()
 
         fun update(change: (Goals) -> Goals) {
-            val next = change(_goals.value)
+            val changed = change(_goals.value)
+            // Keep "since" for the apps on Use less: new ones start now, removed ones go.
+            val now = System.currentTimeMillis()
+            val next =
+                changed.copy(
+                    since = changed.useLess.associateWith { changed.since[it] ?: now },
+                    pauseFrom = changed.pauseFrom.filterKeys { it in changed.useLess },
+                )
             prefs.edit()
                 .putInt(KEY_TARGET, next.dailyTargetMinutes ?: -1)
                 .putString(KEY_LESS, next.useLess.joinToString(SEP))
@@ -45,6 +56,8 @@ class GoalsStore
                 .putInt(KEY_REMINDER, next.reminderMinutes)
                 .putString(KEY_INTENTION, next.intention)
                 .putString(KEY_INTENTION_DATE, next.intentionDate?.toString())
+                .putString(KEY_SINCE, next.since.entries.joinToString(SEP) { "${it.key}=${it.value}" })
+                .putString(KEY_PAUSE_FROM, next.pauseFrom.entries.joinToString(SEP) { "${it.key}=${it.value}" })
                 .apply()
             _goals.value = next
         }
@@ -57,7 +70,18 @@ class GoalsStore
                 reminderMinutes = prefs.getInt(KEY_REMINDER, 0),
                 intention = prefs.getString(KEY_INTENTION, null),
                 intentionDate = prefs.getString(KEY_INTENTION_DATE, null)?.let { runCatching { LocalDate.parse(it) }.getOrNull() },
+                since = pairs(KEY_SINCE) { it.toLongOrNull() },
+                pauseFrom = pairs(KEY_PAUSE_FROM) { it.toIntOrNull() },
             )
+
+        private fun <T> pairs(
+            key: String,
+            parse: (String) -> T?,
+        ): Map<String, T> =
+            prefs.getString(key, "").orEmpty().split(SEP).mapNotNull { line ->
+                val i = line.lastIndexOf('=')
+                if (i <= 0) null else parse(line.substring(i + 1))?.let { line.substring(0, i) to it }
+            }.toMap()
 
         companion object {
             private const val SEP = "\n"
@@ -67,5 +91,7 @@ class GoalsStore
             private const val KEY_REMINDER = "reminder_minutes"
             private const val KEY_INTENTION = "intention"
             private const val KEY_INTENTION_DATE = "intention_date"
+            private const val KEY_SINCE = "use_less_since"
+            private const val KEY_PAUSE_FROM = "pause_from"
         }
     }

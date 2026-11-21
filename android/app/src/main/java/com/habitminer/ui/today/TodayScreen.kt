@@ -87,6 +87,7 @@ import com.habitminer.ui.design.DayRibbonChart
 import com.habitminer.ui.design.HeroContainer
 import com.habitminer.ui.design.HeroDuration
 import com.habitminer.ui.design.ScreenPadding
+import com.habitminer.ui.design.PatternCard
 import com.habitminer.ui.design.SectionHeader
 import com.habitminer.ui.design.StatColumn
 import com.habitminer.ui.design.StatRow
@@ -111,6 +112,9 @@ interface TodayNavigation {
 
     /** Opens the system file picker for an export ZIP. */
     fun pickImportFile() {}
+
+    /** Trends, where all your patterns are. */
+    fun openPatterns() {}
 }
 
 @Composable
@@ -322,6 +326,15 @@ fun TodayScreen(
                                 state.features.moodCheck && TimeUtil.minuteOfDay(now, zone) < it
                             }?.let { "Mood check at ${Format.clockFromMinutes(it)}" },
                     )
+                    pickPattern(insights?.patterns.orEmpty(), today)?.let { p ->
+                        Spacer(Modifier.height(14.dp))
+                        PatternCard(p, raised = true, onOpenSleep = nav::openSleep)
+                        if ((insights?.patterns?.size ?: 0) > 1) {
+                            TextButton(onClick = nav::openPatterns, modifier = Modifier.padding(horizontal = ScreenPadding)) {
+                                Text("All your patterns (${insights?.patterns?.size})", color = LocalDataColors.current.freeHue.text)
+                            }
+                        }
+                    }
                     if (state.widgetPrompt) {
                         Spacer(Modifier.height(14.dp))
                         WidgetPromptPanel(onAdd = actions::pinWidget, onNotNow = actions::dismissWidgetPrompt)
@@ -773,4 +786,22 @@ private fun WidgetPromptPanel(
             TextButton(onClick = onNotNow) { Text("Not now", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
     }
+}
+
+/**
+ * The pattern Today leads with once nothing needs an answer: the strongest recent one (this
+ * week, last night) if there is one, otherwise the slower patterns in turn, one a day.
+ */
+internal fun pickPattern(
+    patterns: List<com.habitminer.analytics.Pattern>,
+    today: java.time.LocalDate,
+): com.habitminer.analytics.Pattern? {
+    patterns.filter { it.fresh }.maxByOrNull { it.strength }?.let { fresh ->
+        // Fresh ones lead on alternate days, so the slower ones still get their turn.
+        val slow = patterns.filterNot { it.fresh }
+        if (slow.isEmpty() || today.toEpochDay() % 2 == 0L) return fresh
+        return slow[((today.toEpochDay() / 2) % slow.size).toInt()]
+    }
+    if (patterns.isEmpty()) return null
+    return patterns[(today.toEpochDay() % patterns.size).toInt()]
 }

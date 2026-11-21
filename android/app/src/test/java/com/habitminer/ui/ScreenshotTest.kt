@@ -104,9 +104,46 @@ class ScreenshotTest {
                 useLess = data.state.appSummaries.take(2).map { it.packageName }.toSet(),
                 pauseEnabled = true,
                 serviceOn = true,
-                onGuard = { _, _ -> },
+                onGuard = { _, _, _ -> },
                 onOpenGoals = {},
             )
+
+    /** Illustrative patterns over the sample apps, in the app's own wording. */
+    private fun samplePatterns(): List<com.habitminer.analytics.Pattern> {
+        val K = com.habitminer.analytics.PatternKind
+        val A = com.habitminer.analytics.PatternAction
+        return listOf(
+            com.habitminer.analytics.Pattern(
+                K.LONG_SESSIONS, "LONG|com.drifty.yt", "2 long YT (drifty) sessions a day make up 63% of its time",
+                "Sessions of 15 minutes or more, mostly starting between 00:00 and 03:00. The other 8 visits a day are mostly quick checks under 2 minutes.",
+                "com.drifty.yt", "YT (drifty)", A.PAUSE_APP_AT_NIGHT, 23 * 60, strength = 0.95f,
+            ),
+            com.habitminer.analytics.Pattern(
+                K.WEEK_CHANGE, "WEEK", "This week: 1h 17m a day less than the week before",
+                "6h 38m a day over the last 7 days, 7h 55m the 7 before.", fresh = true, good = true, strength = 0.7f,
+            ),
+            com.habitminer.analytics.Pattern(
+                K.LATE_WEEKDAY_SLEEP, "LATE_SLEEP", "Late weekday nights cost you about 1h 24m of sleep",
+                "On weekday nights you fell asleep after about 03:20, you slept 6h 10m instead of 7h 34m: you woke only 24m later.",
+                action = A.OPEN_SLEEP, strength = 0.9f,
+            ),
+            com.habitminer.analytics.Pattern(
+                K.NOTIFICATION_PULL, "NOTE|com.topgames.evony", "Evony notifications often pull you in",
+                "When your phone use starts with a notification from Evony, you stay 15 minutes or more 33% of the time (30 of 91). Without a notification it's 10%.",
+                "com.topgames.evony", "Evony", A.APP_NOTIFICATIONS, strength = 0.75f,
+            ),
+            com.habitminer.analytics.Pattern(
+                K.CHECKING_PEAK, "CHECKS", "You open an app about every 4 minutes, all day",
+                "About 15 quick checks (under 2 minutes) an hour in your busiest twelve hours, 12:00 to 00:00, mostly Snapchat, WhatsApp. They add little time, but each one breaks up what you were doing.",
+                strength = 0.45f,
+            ),
+            com.habitminer.analytics.Pattern(
+                K.LEAD_IN, "LEAD|com.whatsapp|com.snapchat.android", "41% of your Snapchat opens come right after WhatsApp",
+                "Within two minutes of leaving WhatsApp (210 of 512 visits in the last four weeks). A pause on Snapchat catches that moment.",
+                "com.snapchat.android", "Snapchat", A.PAUSE_APP, strength = 0.6f,
+            ),
+        )
+    }
 
     private fun shoot(
         name: String,
@@ -141,7 +178,10 @@ class ScreenshotTest {
     fun todayCheckIn() = shoot("03_today_checkin", dark = false) { TodayScreen(data.state.copy(pendingCheckInPromptedAt = data.now), NoActions, NoNav, now = data.now) }
 
     @Test
-    fun trendsOverview() = shoot("04_trends_overview", dark = true) { TrendsScreen(data.state, NoActions, TrendsTab.OVERVIEW, onOpenApp = {}) }
+    fun trendsOverview() =
+        shoot("04_trends_overview", dark = true) {
+            TrendsScreen(data.state.copy(insights = data.state.insights?.copy(patterns = samplePatterns())), NoActions, TrendsTab.OVERVIEW, onOpenApp = {})
+        }
 
     @Test
     fun trendsApps() = shoot("05_trends_apps", dark = false) { TrendsScreen(data.state, NoActions, TrendsTab.APPS, onOpenApp = {}) }
@@ -181,6 +221,14 @@ class ScreenshotTest {
                 onChange = {},
                 onOpenApp = {},
                 today = java.time.LocalDate.of(2026, 10, 3),
+                impacts =
+                    apps.take(2).associate { a ->
+                        a.packageName to
+                            com.habitminer.analytics.GoalImpact(
+                                a.packageName, data.now - 8 * TimeUtil.DAY, days = 7, pauses = 23, closed = 15, openedAnyway = 7,
+                                afterPerDayMs = a.weekMs / 7 * 3 / 4, beforePerDayMs = a.weekMs / 7,
+                            )
+                    },
             )
         }
 
@@ -192,7 +240,8 @@ class ScreenshotTest {
         shoot("13_app_detail", dark = false) {
             val pkg = data.state.appSummaries.first().packageName
             val detail = UsageSummaries.detail(data.sessions.filter { it.packageName == pkg }, emptyList(), java.time.LocalDate.of(2026, 10, 3), SampleData.zone)
-            AppDetailContent(pkg, AppDetailState(loading = false, detail = detail, routines = listOf("Snapchat → Telegram")), onBack = {})
+            val hook = com.habitminer.analytics.PatternFinder.hook(pkg, data.sessions, emptyList(), data.unlocks, SampleData.zone)
+            AppDetailContent(pkg, AppDetailState(loading = false, detail = detail, routines = listOf("Snapchat → Telegram"), hook = hook), onBack = {})
         }
 
     @Test
@@ -342,11 +391,24 @@ class ScreenshotTest {
             // Everything answered: today's difference marked expected, the routine change labelled.
             val state =
                 data.state.copy(
+                    widgetPrompt = false,
+                    deviationFeedback = kotlinx.collections.immutable.persistentMapOf<String, String>().putAll(ins.deviations.days.associate { it.key to com.habitminer.data.UserLabelEntity.FEEDBACK_EXPECTED }),
+                    insights = ins.copy(naps = emptyList(), insight = null, answers = ins.answers + listOfNotNull(ins.deviations.shift?.key?.let { it to "labelled" }), patterns = samplePatterns()),
+                )
+            TodayScreen(state, NoActions, NoNav, dailyTargetMinutes = 240, now = data.now)
+        }
+
+    @Test
+    fun todayWidgetPrompt() =
+        shoot("29_today_widget", dark = true) {
+            val ins = data.state.insights!!
+            val state =
+                data.state.copy(
                     widgetPrompt = true,
                     deviationFeedback = kotlinx.collections.immutable.persistentMapOf<String, String>().putAll(ins.deviations.days.associate { it.key to com.habitminer.data.UserLabelEntity.FEEDBACK_EXPECTED }),
                     insights = ins.copy(naps = emptyList(), insight = null, answers = ins.answers + listOfNotNull(ins.deviations.shift?.key?.let { it to "labelled" })),
                 )
-            TodayScreen(state, NoActions, NoNav, dailyTargetMinutes = 240, now = data.now)
+            TodayScreen(state, NoActions, NoNav, now = data.now)
         }
 
     @Test
