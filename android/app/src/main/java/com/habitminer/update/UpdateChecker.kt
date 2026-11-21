@@ -44,9 +44,26 @@ class UpdateChecker
             get() = runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull() ?: ""
 
         /** The update waiting to be installed, from the last answer, or null. */
-        fun pending(): ReleaseInfo? =
-            runCatching { UpdateJson.fromCache(prefs.getString(PrefsKeys.UPDATE_CACHED, null)) }.getOrNull()
-                ?.let { UpdateLogic.newest(listOf(it), installedCode, prefs.getString(PrefsKeys.UPDATE_SKIPPED, null)) }
+        fun pending(): ReleaseInfo? {
+            ensureRepository()
+            val cached = runCatching { UpdateJson.fromCache(prefs.getString(PrefsKeys.UPDATE_CACHED, null)) }.getOrNull()
+                ?: return null
+            if (!UpdateLogic.trustedDownload(cached.apkUrl, UpdateConfig.REPO)) return null
+            return UpdateLogic.newest(listOf(cached), installedCode, prefs.getString(PrefsKeys.UPDATE_SKIPPED, null))
+        }
+
+        /**
+         * ETags and cached releases are specific to a repository. Drop them when the release
+         * source changes so an old cache cannot advertise an untrusted or obsolete APK.
+         */
+        private fun ensureRepository() {
+            if (prefs.getString(PrefsKeys.UPDATE_REPO, null) == UpdateConfig.REPO) return
+            prefs.edit()
+                .remove(PrefsKeys.UPDATE_ETAG)
+                .remove(PrefsKeys.UPDATE_CACHED)
+                .putString(PrefsKeys.UPDATE_REPO, UpdateConfig.REPO)
+                .apply()
+        }
 
         fun skip(tag: String) {
             prefs.edit().putString(PrefsKeys.UPDATE_SKIPPED, tag).apply()
@@ -58,6 +75,7 @@ class UpdateChecker
 
         /** Checks if a day has passed (or [force]); returns the pending update after the check. */
         suspend fun check(force: Boolean = false): ReleaseInfo? {
+            ensureRepository()
             if (!enabled && !force) return null
             val now = System.currentTimeMillis()
             val last = prefs.getLong(PrefsKeys.UPDATE_LAST_CHECK, 0L)
@@ -99,7 +117,7 @@ class UpdateChecker
                         lastCheckFailed = true
                         backOff(now, conn.getHeaderField("Retry-After")?.toLongOrNull())
                     }
-                    404 -> prefs.edit().putLong(PrefsKeys.UPDATE_LAST_CHECK, now).apply() // no releases yet
+                    404 -> prefs.edit().remove(PrefsKeys.UPDATE_CACHED).putLong(PrefsKeys.UPDATE_LAST_CHECK, now).apply() // no releases yet
                     else -> {
                         lastCheckFailed = true
                         backOff(now, null)
@@ -140,7 +158,7 @@ class UpdateChecker
 
 object UpdateConfig {
     /** Where releases are published. */
-    const val REPO = "harshshrivastava27/HabitMiner-Extended"
+    const val REPO = "Reyatsu99/HabitMiner-Refactored"
 }
 
 internal object UpdateJson {
