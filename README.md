@@ -5,9 +5,9 @@
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.3-purple.svg)](https://kotlinlang.org/)
 [![Android](https://img.shields.io/badge/Android-8.0%2B-green.svg)](https://developer.android.com/)
-[![Version](https://img.shields.io/badge/Version-2.0-blue.svg)](#-whats-new-in-extended)
+[![Version](https://img.shields.io/badge/Version-2.1-blue.svg)](#-whats-new-in-extended)
 
-HabitMiner Extended is the next version of [HabitMiner](README_OLD.md). It installs as its own app (**HM Extended**, `com.habitminer.extended`) next to the original, can bring the original's history across, and adds a redesigned interface, better sleep and nap tracking, goals, and a long list of accuracy fixes found by using it every day.
+HabitMiner Extended is the next version of [HabitMiner](README_OLD.md). It installs as its own app (**HM Extended**, `com.habitminer.extended`) next to the original, can bring the original's history across, and adds a redesigned interface, better sleep and nap tracking, goals, a long list of accuracy fixes found by using it every day, and (in 2.1) shorter daily loops: act on an insight in one tap, a mindful pause that tells you something, and a Today screen that ends.
 
 Everything stays on the phone. There is no account and no server; data leaves the device only when you export it.
 
@@ -19,12 +19,53 @@ Everything stays on the phone. There is no account and no server; data leaves th
   <img src="docs/screenshots/extended/overview.png" alt="HabitMiner Extended: Today, Sleep, Trends, Goals and Status" width="100%">
 </p>
 
+### New in 2.1
+
+<table>
+  <tr>
+    <td align="center" valign="top" width="33%">
+      <img src="docs/screenshots/extended/today_app_insight.png" alt="Insight with a one-tap pause" width="250"><br>
+      <b>From insight to action</b><br>
+      <sub>An insight about using one app more offers "Pause before…" or "Use less" in one tap. Once it's on your list, a quiet line says so instead.</sub>
+    </td>
+    <td align="center" valign="top" width="33%">
+      <img src="docs/screenshots/extended/mindful_pause.png" alt="Mindful pause with context" width="250"><br>
+      <b>A pause that tells you something</b><br>
+      <sub>How many times you've opened the app this hour or today, and how long a visit around now usually lasts. "Close" leads; "Open anyway" waits.</sub>
+    </td>
+    <td align="center" valign="top" width="33%">
+      <img src="docs/screenshots/extended/today_caught_up.png" alt="All caught up" width="250"><br>
+      <b>All caught up</b><br>
+      <sub>When nothing needs an answer, one quiet line and the next check-in. Today now ends at about a screen and a half.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" valign="top" width="33%">
+      <img src="docs/screenshots/extended/today_morning.png" alt="Today in the morning" width="250"><br>
+      <b>Follows your day</b><br>
+      <sub>For three hours after you wake, Today leads with last night. During the day, today against a usual day.</sub>
+    </td>
+    <td align="center" valign="top" width="33%">
+      <img src="docs/screenshots/extended/today_evening.png" alt="Today in the evening" width="250"><br>
+      <b>Evening wrap-up</b><br>
+      <sub>From about 2½ hours before your usual bedtime (21:00 at the latest): where you are against your target, and when you usually fall asleep.</sub>
+    </td>
+    <td align="center" valign="top" width="33%">
+      <img src="docs/screenshots/extended/goals.png" alt="Goals with weekly dots" width="250"><br>
+      <b>5 of the last 7 days</b><br>
+      <sub>Seven dots for the target and each app, today as a ring still in progress. Rolling, so Monday never resets you to zero.</sub>
+    </td>
+  </tr>
+</table>
+
+### All screens
+
 <table>
   <tr>
     <td align="center" valign="top" width="33%">
       <img src="docs/screenshots/extended/today.png" alt="Today" width="250"><br>
       <b>Today</b><br>
-      <sub>Rings for screen time, pickups and phone-free time, today against a usual day at this hour, and your intention for the day.</sub>
+      <sub>Rings for screen time, pickups and phone-free time, today against a usual day at this hour, your intention, and one question or insight at a time.</sub>
     </td>
     <td align="center" valign="top" width="33%">
       <img src="docs/screenshots/extended/today_dark.png" alt="Today, dark" width="250"><br>
@@ -58,12 +99,12 @@ Everything stays on the phone. There is no account and no server; data leaves th
     <td align="center" valign="top" width="33%">
       <img src="docs/screenshots/extended/trends_overview.png" alt="Trends" width="250"><br>
       <b>Trends</b><br>
-      <sub>The last 7 days against the week before, biggest changes, today against a usual day, and the week heatmap.</sub>
+      <sub>The last 7 days against the week before, biggest changes, today against a usual day, the week heatmap, and your surroundings.</sub>
     </td>
     <td align="center" valign="top" width="33%">
       <img src="docs/screenshots/extended/trends_routines.png" alt="Routines" width="250"><br>
       <b>Routines</b><br>
-      <sub>How predictable your next app is, measured against simple baselines, its latest guesses, and your app sequences.</sub>
+      <sub>How predictable your next app is, measured against simple baselines, its latest guesses, and your app sequences. Tap a routine to put a pause on one of its apps.</sub>
     </td>
     <td align="center" valign="top" width="33%">
       <img src="docs/screenshots/extended/trends_changes.png" alt="Changes" width="250"><br>
@@ -73,7 +114,12 @@ Everything stays on the phone. There is no account and no server; data leaves th
   </tr>
   <tr>
     <td align="center" valign="top" width="33%">
-      <img src="docs/screenshots/extended/goals.png" alt="Goals" width="250"><br>
+      <img src="docs/screenshots/extended/app_detail.png" alt="App detail" width="250"><br>
+      <b>App detail</b><br>
+      <sub>Time per day, the last 14 days, when you use it, what brings you there, and a one-tap pause.</sub>
+    </td>
+    <td align="center" valign="top" width="33%">
+      <img src="docs/screenshots/extended/goals_dark.png" alt="Goals" width="250"><br>
       <b>Goals</b><br>
       <sub>Soft targets: a daily intention, a phone-time target, apps to use less or more, and reminders. Nothing is blocked.</sub>
     </td>
@@ -82,13 +128,13 @@ Everything stays on the phone. There is no account and no server; data leaves th
       <b>Status</b><br>
       <sub>Whether collection is working, a permission checklist, and what HabitMiner itself costs in battery.</sub>
     </td>
+  </tr>
+  <tr>
     <td align="center" valign="top" width="33%">
       <img src="docs/screenshots/extended/weekly_story.png" alt="Weekly Story" width="250"><br>
       <b>Weekly Story</b><br>
       <sub>Your last seven days in a few cards, a month at a glance, and one small experiment to try.</sub>
     </td>
-  </tr>
-  <tr>
     <td align="center" valign="top" width="33%">
       <img src="docs/screenshots/extended/today_mood.png" alt="Daily mood check" width="250"><br>
       <b>Daily mood check</b><br>
@@ -99,6 +145,8 @@ Everything stays on the phone. There is no account and no server; data leaves th
       <b>Bring your data across</b><br>
       <sub>Import an export from the original HabitMiner: app use, readings, labels and places, with routines rebuilt.</sub>
     </td>
+  </tr>
+  <tr>
     <td align="center" valign="top" width="33%">
       <img src="docs/screenshots/extended/onboarding.png" alt="First run" width="250"><br>
       <b>First run</b><br>
@@ -127,8 +175,8 @@ Everything stays on the phone. There is no account and no server; data leaves th
 - **Insight of the day**, **Weekly Story**, and context insights such as screen time in the dark or after midnight.
 
 **Acting on it**
-- **Goals**: a daily intention, a phone-time target, apps to use less or more, and reminders when you're over.
-- **Gentle nudges**, an optional **mindful pause** and **focus sessions** (both off by default), a home-screen **widget**, a **Quick Settings tile** and app **shortcuts**.
+- **Goals**: a daily intention, a phone-time target, apps to use less or more with "N of the last 7 days" dots, and reminders when you're over.
+- **One-tap pause** from insights, routines and app pages; **gentle nudges**, an optional **mindful pause** that shows how often you've opened the app, and **focus sessions** (both off by default), a home-screen **widget**, a **Quick Settings tile** and app **shortcuts**.
 - **Quick check-ins** and **Expected / Unusual** answers are saved as ground-truth labels, with the context at the time.
 
 **Your data**
@@ -139,6 +187,15 @@ Everything stays on the phone. There is no account and no server; data leaves th
 ---
 
 ## 🆕 What's new in Extended
+
+### 2.1: shorter daily loops
+- **Insight → action**: insights and differences about using one app more, each routine in Trends → Routines, and every app's detail page offer **Pause before opening** or **Use less** in one tap. Apps already on your list show "Pause on before Instagram" with an Edit link instead of the same buttons again, and if Android's Accessibility switch for the pause is off, the button takes you there.
+- **A mindful pause with context**: "This is your 6th time in Instagram in the last hour" and "Around this time, a visit usually lasts about 20m", from one quick query so the timer shows at once. **Close [app]** is the main button; **Open anyway** is secondary and waits for the timer.
+- **A shorter Today**: one raised card at a time (nap question, mood, insight, difference or routine change), and **All caught up** with the next check-in when nothing needs an answer. The hero follows your own day: last night for three hours after you wake, the comparison with a usual day after that, and a wrap-up from about 2½ hours before your usual bedtime (21:00 at the latest). Last night lives on Sleep, Around you on Trends, and Apps today shows the top three.
+- **Weekly goal counts**: "Under target on 5 of the last 7 days" with seven dots, today as a ring in progress, for the phone-time target and for each Use less / Use more app against its previous week.
+- **Widget offer**: once, after two days of data, and only if the launcher supports pinning and no Today widget is placed yet, Today offers to add it.
+
+The README for 2.0 is kept as [README_2.0.md](README_2.0.md).
 
 ### 2.0: redesign and new features
 - **Vivid redesign**: activity rings on Today, one bright colour per measure, true-black dark mode, coloured icon tiles and gradient charts, five tabs (Today, Trends, Sleep, Goals, Status) each with its own colour, and the Mona Sans typeface.
@@ -223,4 +280,4 @@ Requires JDK 21 and a physical Android 8.0+ device; emulators don't produce real
 ---
 
 ## 📄 License
-Distributed under the MIT License. The README for HabitMiner 1.3.1 is kept as [README_OLD.md](README_OLD.md).
+Distributed under the MIT License. The README for HabitMiner 1.3.1 is kept as [README_OLD.md](README_OLD.md), and the one for Extended 2.0 as [README_2.0.md](README_2.0.md).
