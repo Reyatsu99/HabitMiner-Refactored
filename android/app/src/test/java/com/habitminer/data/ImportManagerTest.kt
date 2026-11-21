@@ -9,6 +9,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -83,6 +84,16 @@ class ImportManagerTest {
             assertNull(snaps.getValue(6000).proximityNear)
             assertEquals(true, snaps.getValue(6000).isCharging)
         }
+
+    @Test
+    fun `rejects archives with too many entries`() {
+        val entries = Array(33) { index -> "ignored_$index.txt" to "" }
+        val uri = zip(*entries)
+
+        assertThrows(IllegalArgumentException::class.java) {
+            runBlocking { importer.importZip(uri) }
+        }
+    }
 
     @Test
     fun `imports labels and places from a v1_2 export`() =
