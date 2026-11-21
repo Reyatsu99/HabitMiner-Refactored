@@ -245,13 +245,13 @@ object ContextualBehaviorAnalyzer {
     ): List<ContextRelationship> {
         val groups = use.keys.map { GroupKey(it.appName, it.dimension, it.phrase) }.distinct()
         val output = mutableListOf<ContextRelationship>()
+        val exposureByDimensionAndStratum = exposure.entries.groupBy { it.key.dimension to it.key.stratum }
+        val strataByDimensionAndPhrase = exposure.keys
+            .groupBy { it.dimension to it.phrase }
+            .mapValues { (_, keys) -> keys.map { it.stratum }.distinct() }
 
         for (group in groups) {
-            val strata = exposure.keys.asSequence()
-                .filter { it.dimension == group.dimension && it.phrase == group.phrase }
-                .map { it.stratum }
-                .distinct()
-                .toList()
+            val strata = strataByDimensionAndPhrase[group.dimension to group.phrase].orEmpty()
 
             var stateExposureMs = 0L
             var otherExposureMs = 0L
@@ -270,16 +270,16 @@ object ContextualBehaviorAnalyzer {
 
             for (stratum in strata) {
                 val stateExposure = exposure[ExposureKey(group.dimension, group.phrase, stratum)] ?: continue
-                val otherEntries = exposure.filterKeys {
-                    it.dimension == group.dimension && it.stratum == stratum && it.phrase != group.phrase
-                }
-                val otherStratumExposureMs = otherEntries.values.sumOf { it.durationMs }
+                val otherEntries = exposureByDimensionAndStratum[group.dimension to stratum]
+                    .orEmpty()
+                    .filter { it.key.phrase != group.phrase }
+                val otherStratumExposureMs = otherEntries.sumOf { it.value.durationMs }
                 if (stateExposure.durationMs < MIN_STRATUM_EXPOSURE_MS ||
                     otherStratumExposureMs < MIN_STRATUM_EXPOSURE_MS) continue
 
                 val stateUse = use[UseKey(group.appName, group.dimension, group.phrase, stratum)]
-                val otherUseEntries = otherEntries.keys.mapNotNull { key ->
-                    use[UseKey(group.appName, group.dimension, key.phrase, stratum)]
+                val otherUseEntries = otherEntries.mapNotNull { entry ->
+                    use[UseKey(group.appName, group.dimension, entry.key.phrase, stratum)]
                 }
                 val stratumStateUseMs = stateUse?.durationMs ?: 0L
                 val stratumOtherUseMs = otherUseEntries.sumOf { it.durationMs }
@@ -294,7 +294,7 @@ object ContextualBehaviorAnalyzer {
                 weightedStateRate += (stratumStateUseMs.toDouble() / stateExposure.durationMs) * commonWeight
                 weightedOtherRate += (stratumOtherUseMs.toDouble() / otherStratumExposureMs) * commonWeight
                 stateExposureDays += stateExposure.days
-                otherEntries.values.forEach { otherExposureDays += it.days }
+                otherEntries.forEach { otherExposureDays += it.value.days }
 
                 if (stateUse != null) {
                     stateUseMs += stateUse.durationMs
