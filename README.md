@@ -320,4 +320,4 @@ Requires JDK 21 and a physical Android 8.0+ device; emulators don't produce real
 ---
 
 ## 📄 License
-Distributed under the MIT License. The README for HabitMiner 1.3.1 is kept as [README_OLD.md](README_OLD.md), and the one for Extended 2.0 as [README_2.0.md](README_2.0.md).
+Distributed under the MIT License. The README for HabitMiner 1.3.1 is kept as [README_OLD.md](docs/archive/README_OLD.md), and the one for Extended 2.0 as [README_2.0.md](docs/archive/README_2.0.md).
