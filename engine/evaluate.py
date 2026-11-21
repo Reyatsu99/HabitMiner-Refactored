@@ -1,9 +1,9 @@
 import pandas as pd
 import numpy as np
-from typing import Dict, List, Tuple
+from typing import Tuple
 from feature_extraction import extract_sequences, extract_time_bin_features
-from habit_discovery import mine_frequent_sequences, DiscoveredHabit
-from baseline_model import PersonalBaseline, build_baselines_for_all_users
+from habit_discovery import mine_frequent_sequences
+from baseline_model import build_baselines_for_all_users
 from deviation_detector import detect_deviations, inject_controlled_deviation
 from markov_model import TimeConditionedMarkovModel
 
