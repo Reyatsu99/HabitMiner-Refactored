@@ -1,5 +1,4 @@
 import pandas as pd
-import json
 
 def generate_evaluation_report(
     results: dict,
