@@ -300,6 +300,8 @@ class MainActivity : ComponentActivity() {
                             override fun pickImportFile() = importLauncher.launch(IMPORT_TYPES)
 
                             override fun openPatterns() = nav.goTab("${Tab.TRENDS.route}?tab=${TrendsTab.OVERVIEW.name}")
+
+                            override fun openStory() = nav.navigate(ROUTE_STORY) { launchSingleTop = true }
                         },
                         intention = goals.intentionFor(java.time.LocalDate.now()),
                         dailyTargetMinutes = goals.dailyTargetMinutes,

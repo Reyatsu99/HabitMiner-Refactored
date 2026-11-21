@@ -499,6 +499,29 @@ class ScreenshotTest {
             )
         }
 
+    private fun story(
+        name: String,
+        slide: com.habitminer.analytics.StorySlide,
+        index: Int,
+        count: Int,
+    ) = shoot(name, dark = true) { com.habitminer.ui.today.StoryPage(slide, index, count, onNext = {}, onBack = {}, onClose = {}) }
+
+    @Test
+    fun storyLongSessions() = story("30_story_long_sessions", com.habitminer.analytics.Explainer.explain(samplePatterns()[0])!!, 0, 4)
+
+    @Test
+    fun storySleep() = story("31_story_sleep", com.habitminer.analytics.Explainer.explain(samplePatterns()[2])!!, 1, 4)
+
+    @Test
+    fun storyChecking() = story("32_story_checking", com.habitminer.analytics.Explainer.explain(samplePatterns()[4])!!, 2, 4)
+
+    @Test
+    fun storyLastNight() {
+        val ins = data.state.insights!!
+        val slides = com.habitminer.analytics.Explainer.lastNight(ins.lastNight!!, ins.sleepWeek?.avgNightMs, ins.sleepWeek?.avgBedtimeMinutes, SampleData.zone)
+        story("33_story_last_night", slides.first(), 0, slides.size)
+    }
+
     /** Robolectric devices have no sensors; register the five the app uses. */
     private fun registerSensors() {
         val contexts =

@@ -87,7 +87,6 @@ import com.habitminer.ui.design.DayRibbonChart
 import com.habitminer.ui.design.HeroContainer
 import com.habitminer.ui.design.HeroDuration
 import com.habitminer.ui.design.ScreenPadding
-import com.habitminer.ui.design.PatternCard
 import com.habitminer.ui.design.SectionHeader
 import com.habitminer.ui.design.StatColumn
 import com.habitminer.ui.design.StatRow
@@ -115,6 +114,9 @@ interface TodayNavigation {
 
     /** Trends, where all your patterns are. */
     fun openPatterns() {}
+
+    /** The Weekly Story. */
+    fun openStory() {}
 }
 
 @Composable
@@ -172,6 +174,51 @@ fun TodayScreen(
 
     LazyColumn(modifier = modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 32.dp)) {
         item(key = "top") { TopLine(today, nav::openSettings) }
+
+        // Stories, like Instagram's: today's insights, last night, and your week.
+        item(key = "stories") {
+            val context = androidx.compose.ui.platform.LocalContext.current
+            var openSlides by remember { androidx.compose.runtime.mutableStateOf<List<com.habitminer.analytics.StorySlide>?>(null) }
+            var seenTick by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+            val todayStamp = today.toString()
+            val weekStamp = today.with(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY)).toString()
+            val todaySlides = remember(insights?.patterns, today) { com.habitminer.analytics.Explainer.today(insights?.patterns.orEmpty(), today) }
+            val nightSlides =
+                remember(lastNight, insights?.sleepWeek) {
+                    lastNight?.let { n ->
+                        com.habitminer.analytics.Explainer.lastNight(
+                            n,
+                            insights?.sleepWeek?.avgNightMs?.takeIf { it > 0 },
+                            insights?.sleepWeek?.avgBedtimeMinutes ?: insights?.sleepSummary?.avgBedtimeMinutes,
+                            zone,
+                        )
+                    }.orEmpty()
+                }
+            val bubbles =
+                remember(todaySlides, nightSlides, seenTick, todayStamp) {
+                    buildList {
+                        if (todaySlides.isNotEmpty()) {
+                            add(StoryBubble("today", "Today", StoryIcons.today, com.habitminer.analytics.StoryTone.CALM, StorySeen.seen(context, "today", todayStamp + todaySlides.size), todaySlides))
+                        }
+                        if (nightSlides.isNotEmpty()) {
+                            add(StoryBubble("night", "Last night", StoryIcons.night, com.habitminer.analytics.StoryTone.SLEEP, StorySeen.seen(context, "night", todayStamp), nightSlides))
+                        }
+                        if (state.daysOfData >= 3) {
+                            add(StoryBubble("week", "Your week", StoryIcons.week, com.habitminer.analytics.StoryTone.SCREEN, StorySeen.seen(context, "week", weekStamp)))
+                        }
+                    }
+                }
+            StoryStrip(bubbles) { b ->
+                when (b.id) {
+                    "today" -> StorySeen.mark(context, "today", todayStamp + todaySlides.size)
+                    "night" -> StorySeen.mark(context, "night", todayStamp)
+                    "week" -> StorySeen.mark(context, "week", weekStamp)
+                }
+                seenTick++
+                if (b.slides.isEmpty()) nav.openStory() else openSlides = b.slides
+            }
+            openSlides?.let { slides -> StoryViewer(slides, onClose = { openSlides = null }, onOpenSleep = nav::openSleep) }
+        }
 
         item(key = "hero") {
             TodayRings(state, dailyTargetMinutes, zone)
@@ -326,15 +373,6 @@ fun TodayScreen(
                                 state.features.moodCheck && TimeUtil.minuteOfDay(now, zone) < it
                             }?.let { "Mood check at ${Format.clockFromMinutes(it)}" },
                     )
-                    pickPattern(insights?.patterns.orEmpty(), today)?.let { p ->
-                        Spacer(Modifier.height(14.dp))
-                        PatternCard(p, raised = true, onOpenSleep = nav::openSleep, onHide = { intentional -> actions.hidePattern(p.key, intentional) })
-                        if ((insights?.patterns?.size ?: 0) > 1) {
-                            TextButton(onClick = nav::openPatterns, modifier = Modifier.padding(horizontal = ScreenPadding)) {
-                                Text("All your patterns (${insights?.patterns?.size})", color = LocalDataColors.current.freeHue.text)
-                            }
-                        }
-                    }
                     if (state.widgetPrompt) {
                         Spacer(Modifier.height(14.dp))
                         WidgetPromptPanel(onAdd = actions::pinWidget, onNotNow = actions::dismissWidgetPrompt)
