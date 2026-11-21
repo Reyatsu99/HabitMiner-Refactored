@@ -19,6 +19,11 @@ HabitMiner Extended 2.2 adds **Your patterns**: things that are true about how o
 - **What to do about checking all day.** For the top three quick-check apps, the share of checks that came within a minute of the app's own notification: for one user, about 40% for the main messenger but 0–2% for the other two; for the other user, 43% for the messenger and 14–20% for the rest. So quieter notifications help only some apps. The card offers notification settings only for an app where at least 30% of checks follow its notifications, and says which apps you open by yourself. It never offers a pause for chat apps you check dozens of times a day.
 - **Weeknights only.** Long sessions after 23:00 were spread evenly over the week for both users (69–70% on Sunday to Thursday nights, against 71% if evenly spread), but they cost sleep only before weekdays. So the night pause offered from the sleep pattern applies Sunday to Thursday nights by default, with "every night" as the other choice; the long-sessions pattern pauses every night.
 
+## Checked for 2.6
+
+- **Notification noise.** One user's export logged about 18,000 notifications leaving the shade: about 4% opened, about 29% cleared by the user (one by one or with "clear all"), and over half withdrawn by the app itself. Several apps (payments, shopping, news) had hundreds cleared and none or almost none opened. The pattern counts only the user's own clearing, needs 15 or more in four weeks with at most 1 in 10 opened, and leaves out system notices, the alarm clock and HabitMiner itself.
+- **Around sleep.** The first and last app around a night now skip the alarm clock and system screens: setting an alarm last thing at night was hiding the app actually used before sleep.
+
 ## Kept behind a strict threshold
 
 - **Busiest hours** (a "danger zone"): shown only when two hours hold 25%+ of screen time (an even spread is about 12%). Neither user ever reached it in any week (highest 22%), but it is kept for people whose use is concentrated.
