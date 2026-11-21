@@ -7,7 +7,7 @@
 [![Android](https://img.shields.io/badge/Android-8.0%2B-green.svg)](https://developer.android.com/)
 [![Version](https://img.shields.io/badge/Version-2.2-blue.svg)](#-whats-new-in-extended)
 
-HabitMiner Extended is the next version of [HabitMiner](README_OLD.md). It installs as its own app (**HM Extended**, `com.habitminer.extended`) next to the original, can bring the original's history across, and adds a redesigned interface, better sleep and nap tracking, goals, a long list of accuracy fixes found by using it every day, shorter daily loops (2.1), and (in 2.2) **patterns**: what pulls you into your phone, what it costs you, and whether your changes are working.
+HabitMiner Extended is the next version of [HabitMiner](docs/archive/README_OLD.md). It installs as its own app (**HM Extended**, `com.habitminer.extended`) next to the original, can bring the original's history across, and adds a redesigned interface, better sleep and nap tracking, goals, a long list of accuracy fixes found by using it every day, shorter daily loops (2.1), and (in 2.2) **patterns**: what pulls you into your phone, what it costs you, and whether your changes are working.
 
 Everything stays on the phone. There is no account and no server; data leaves the device only when you export it.
 
@@ -177,7 +177,7 @@ Everything stays on the phone. There is no account and no server; data leaves th
   </tr>
 </table>
 
-<sub>Rendered by the app's screenshot tests (Robolectric) with two weeks of sample data, so the numbers are illustrative. Every push to <code>habitminer-extended</code> regenerates them on the <code>ci-out-habitminer-extended</code> branch. Locally: <code>./gradlew testDebugUnitTest --tests "*ScreenshotTest*"</code>, images in <code>android/app/build/screenshots</code>.</sub>
+<sub>Rendered by the app's screenshot tests (Robolectric) with two weeks of sample data, so the numbers are illustrative. Pushes to Android source branches regenerate these screenshots. Non-PR builds publish them to the matching <code>ci-out-&lt;branch-name&gt;</code> branch; pull-request builds upload Actions artifacts only. Locally: <code>./gradlew testDebugUnitTest --tests "*ScreenshotTest*"</code>, images in <code>android/app/build/screenshots</code>.</sub>
 
 ---
 
@@ -232,7 +232,7 @@ Screen time, pickups and per-app time are what Android's Digital Wellbeing alrea
 - **Weekly goal counts**: "Under target on 5 of the last 7 days" with seven dots, today as a ring in progress, for the phone-time target and for each Use less / Use more app against its previous week.
 - **Widget offer**: once, after two days of data, and only if the launcher supports pinning and no Today widget is placed yet, Today offers to add it.
 
-The README for 2.0 is kept as [README_2.0.md](README_2.0.md).
+The README for 2.0 is kept in [docs/archive/README_2.0.md](docs/archive/README_2.0.md).
 
 ### 2.0: redesign and new features
 - **Vivid redesign**: activity rings on Today, one bright colour per measure, true-black dark mode, coloured icon tiles and gradient charts, five tabs (Today, Trends, Sleep, Goals, Status) each with its own colour, and the Mona Sans typeface.
@@ -271,27 +271,30 @@ On the nights with corrected times, wake-up errors went from up to 163 minutes o
 
 ```text
 android/app/src/main/java/com/habitminer/
+├── analytics/    pure Kotlin: sleep, naps, usual days, changes, routines, insights
 ├── collection/   usage log reader, sensors, device events (unlocks, alarms, Do Not Disturb)
 ├── data/         Room entities and DAOs, import/export
-├── repository/   access to stored data for the rest of the app
-├── analytics/    pure Kotlin: sleep, naps, usual days, changes, routines, insights
-├── engine/       analysis pipeline and the ViewModel
+├── di/           Hilt dependency-injection modules
+├── domain/       app identity and domain-level rules
+├── engine/       analysis pipeline, sequential pattern mining and ViewModels
 ├── goals/        targets, intentions and reminders
 ├── mindful/      mindful pause and focus sessions
 ├── proactive/    questions, nudges, reminders, notifications
+├── repository/   access to stored data for the rest of the app
+├── sources/      external and optional data-source integrations
+├── ui/           Compose screens and the design system
 ├── update/       release check and install
-├── widget/       home-screen widget
-└── ui/           Compose screens and the design system
+└── widget/       home-screen widget
 ```
 
-More background on the original design is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
+More background on the original design is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/METHODOLOGY.md](docs/METHODOLOGY.md). See the [repository structure and branch guide](docs/REPOSITORY_GUIDE.md) for the code map and branch responsibilities.
 
 ---
 
 ## 🚀 Getting started
 
 ### Install
-Every push to `habitminer-extended` builds the APK in CI and publishes it on the `ci-out-habitminer-extended` branch as `HabitMinerExtended.apk`. It installs next to the original HabitMiner and keeps its data across updates.
+Pushes to Android source branches run the build and unit-test workflow. Non-PR builds publish screenshots and APKs to the corresponding `ci-out-<branch-name>` branch; pull-request builds upload APKs as workflow artifacts. Release builds are published from version tags such as `v2.4.0`.
 
 To bring your history across: in HabitMiner, open Settings and tap **Export data**, then share the ZIP to **HM Extended** (or use **Choose file** on the Today import card).
 
