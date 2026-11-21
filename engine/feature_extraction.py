@@ -38,6 +38,9 @@ def extract_time_bin_features(usage_df: pd.DataFrame, user_id: str = None) -> pd
             "date": date,
             "day_type": day_type,
             "time_slot": time_slot,
+            "controlled_anomaly": bool(group["controlled_anomaly"].fillna(False).any())
+            if "controlled_anomaly" in group.columns
+            else False,
             "total_duration_seconds": total_duration,
             "session_count": session_count,
             "unique_categories": unique_categories,
