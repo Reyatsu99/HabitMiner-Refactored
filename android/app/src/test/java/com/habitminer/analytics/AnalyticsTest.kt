@@ -1206,8 +1206,18 @@ class UpdateLogicTest {
     }
 
     @Test
+    fun `development version is below the matching release and above legacy releases`() {
+        assertEquals(20600, UpdateLogic.versionCodeOf("v2.6.0"))
+        val releases = listOf(rel("v1.2.0"), rel("v2.5.0"), rel("v2.6.0"))
+        assertNull(UpdateLogic.newest(releases, 20599, null)?.takeIf { it.tag != "v2.6.0" })
+        assertEquals("v2.6.0", UpdateLogic.newest(releases, 20599, null)?.tag)
+        assertNull(UpdateLogic.newest(releases.take(2), 20599, null))
+    }
+
+    @Test
     fun `only this repository's GitHub downloads over https are trusted`() {
         assertTrue(UpdateLogic.trustedDownload("https://github.com/a/b/releases/download/v1.0.0/x.apk", "a/b"))
+        assertTrue(UpdateLogic.trustedDownload("https://github.com/Reyatsu99/HabitMiner-Refactored/releases/download/v2.6.0/app.apk", "Reyatsu99/HabitMiner-Refactored"))
         assertTrue(UpdateLogic.trustedDownload("https://objects.githubusercontent.com/abc", "a/b"))
         assertFalse(UpdateLogic.trustedDownload("http://github.com/a/b/releases/download/v1.0.0/x.apk", "a/b"))
         assertFalse(UpdateLogic.trustedDownload("https://github.com/evil/b/releases/download/v1.0.0/x.apk", "a/b"))
