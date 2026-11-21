@@ -121,6 +121,13 @@ data class GoalImpact(
 object PatternFinder {
     private const val SAME_VISIT_MS = 60_000L
     private const val LINK_MS = 2 * TimeUtil.MINUTE
+
+    /**
+     * An app only counts as where you came from if you were in it this long. Launching an app
+     * from the Google search bar or feed puts Google in front for a second or two; that's how
+     * you opened it, not what led you there.
+     */
+    private const val MIN_LEAD_MS = 15_000L
     private const val QUICK_MS = 2 * TimeUtil.MINUTE
     private const val LONG_MS = 15 * TimeUtil.MINUTE
     private const val WINDOW_DAYS = 28L
@@ -385,7 +392,7 @@ object PatternFinder {
         for (i in 1 until visits.size) {
             val p = visits[i - 1]
             val c = visits[i]
-            if (c.packageName != p.packageName && c.start - p.end <= LINK_MS && c.category.isLeisure) {
+            if (c.packageName != p.packageName && c.start - p.end <= LINK_MS && p.ms >= MIN_LEAD_MS && c.category.isLeisure) {
                 links.merge(p.packageName to c.packageName, 1, Int::plus)
             }
         }
@@ -592,7 +599,7 @@ object PatternFinder {
         var afterUnlock = 0
         for ((i, v) in mine) {
             val p = visits.getOrNull(i - 1)
-            if (p != null && p.packageName != packageName && v.start - p.end <= LINK_MS) from.merge(p.appName, 1, Int::plus)
+            if (p != null && p.packageName != packageName && v.start - p.end <= LINK_MS && p.ms >= MIN_LEAD_MS) from.merge(p.appName, 1, Int::plus)
             val n = visits.getOrNull(i + 1)
             if (n != null && n.packageName != packageName && n.start - v.end <= LINK_MS) next.merge(n.appName, 1, Int::plus)
             val k = upperBound(notes, v.start) - 1
