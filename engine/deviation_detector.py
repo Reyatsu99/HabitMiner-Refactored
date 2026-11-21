@@ -86,7 +86,8 @@ def detect_deviations(
                 description=f"High frequency of app opens ({row['session_count']} sessions)",
                 z_score=z_sess,
                 normalized_score=normalized_score(z_sess),
-                affected_category=row["dominant_category"]
+                affected_category=row["dominant_category"],
+                date=str(row["date"]),
             ))
             
         # Category distribution
@@ -109,7 +110,8 @@ def detect_deviations(
                     description="Significant shift in app usage distribution",
                     z_score=kl_div,  # mapping KL to z roughly
                     normalized_score=min(1.0, kl_div / 3.0),
-                    affected_category=row["dominant_category"]
+                    affected_category=row["dominant_category"],
+                    date=str(row["date"]),
                 ))
                 
         # New behavior check
@@ -139,7 +141,8 @@ def detect_deviations(
                     description=f"Missing expected {c} routine",
                     z_score=-2.0,
                     normalized_score=0.88,
-                    affected_category=c
+                    affected_category=c,
+                    date=str(row["date"]),
                 ))
                 
     deviations.sort(key=lambda x: x.normalized_score, reverse=True)
