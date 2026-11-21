@@ -2,6 +2,9 @@
 
 package com.habitminer.ui.trends
 
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.ShowChart
@@ -271,12 +274,12 @@ private fun RoleChoice(
     )
     val auto = if (category.isLeisure) "Leisure" else "Not leisure"
     val options = listOf(null to "Automatic", com.habitminer.repository.AppRole.LEISURE to "Leisure", com.habitminer.repository.AppRole.WORK to "Work or study")
-    androidx.compose.material3.SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth().padding(horizontal = ScreenPadding)) {
+    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth().padding(horizontal = ScreenPadding)) {
         options.forEachIndexed { i, (r, label) ->
-            androidx.compose.material3.SegmentedButton(
+            SegmentedButton(
                 selected = role == r,
                 onClick = { onRole(r) },
-                shape = androidx.compose.material3.SegmentedButtonDefaults.itemShape(i, options.size),
+                shape = SegmentedButtonDefaults.itemShape(i, options.size),
                 colors = com.habitminer.ui.design.hueSegmentedColors(LocalDataColors.current.freeHue),
             ) { Text(label, maxLines = 1) }
         }

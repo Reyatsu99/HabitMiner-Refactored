@@ -57,7 +57,7 @@ class GoalsStore
                 changed.copy(
                     since = changed.useLess.associateWith { changed.since[it] ?: now },
                     pauseFrom = changed.pauseFrom.filterKeys { it in changed.useLess },
-                    weeknightsOnly = changed.weeknightsOnly.filter { it in changed.pauseFrom },
+                    weeknightsOnly = changed.weeknightsOnly.filter { it in changed.pauseFrom }.toSet(),
                     reasons = changed.reasons.filterKeys { it in changed.useLess },
                 )
             prefs.edit()
