@@ -5,6 +5,7 @@ import android.net.Uri
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
 import java.util.zip.ZipInputStream
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -38,8 +39,22 @@ class ImportManager
             val isEmpty: Boolean get() = filesRead == 0
         }
 
-        private var hiddenNames = false
+        private data class UsageImportResult(val count: Int, val hiddenNames: Boolean)
 
+        private fun readEntryBounded(zip: ZipInputStream, remainingTotalBytes: Long): ByteArray {
+            val output = ByteArrayOutputStream()
+            val buffer = ByteArray(8 * 1024)
+            var entryBytes = 0L
+            while (true) {
+                val count = zip.read(buffer)
+                if (count < 0) break
+                entryBytes += count
+                require(entryBytes <= MAX_ENTRY_BYTES) { "An export file is too large." }
+                require(entryBytes <= remainingTotalBytes) { "The export archive is too large." }
+                output.write(buffer, 0, count)
+            }
+            return output.toByteArray()
+        }
         suspend fun importZip(uri: Uri): Result =
             withContext(Dispatchers.IO) {
                 var usage = 0
@@ -47,34 +62,49 @@ class ImportManager
                 var labels = 0
                 var places = 0
                 var files = 0
-                hiddenNames = false
+                var hiddenNames = false
+                var entries = 0
+                var totalBytes = 0L
                 val input = context.contentResolver.openInputStream(uri) ?: error("Could not open the file")
                 ZipInputStream(input.buffered()).use { zip ->
                     while (true) {
                         val entry = zip.nextEntry ?: break
+                        entries++
+                        require(entries <= MAX_ARCHIVE_ENTRIES) { "The export contains too many files." }
+                        require(entry.size < 0L || entry.size <= MAX_ENTRY_BYTES) { "An export file is too large." }
+                        // Bound every entry, including ignored ones, to prevent compressed
+                        // archives from exhausting memory or hiding oversized payloads.
+                        val bytes = readEntryBounded(zip, MAX_TOTAL_UNCOMPRESSED_BYTES - totalBytes)
+                        totalBytes += bytes.size
                         val name = entry.name.substringAfterLast('/')
-                        if (entry.isDirectory || !name.endsWith(".csv")) continue
-                        val rows = CsvParser.parseWithHeader(zip.readBytes().toString(Charsets.UTF_8))
-                        when {
-                            name.startsWith("app_usage") -> usage += importUsage(rows).also { files++ }
-                            name.startsWith("context_snapshots") -> snapshots += importSnapshots(rows).also { files++ }
-                            name.startsWith("labels") -> labels += importLabels(rows).also { files++ }
-                            name.startsWith("places") -> places += importPlaces(rows).also { files++ }
-                            name.startsWith("device_events") -> importDeviceEvents(rows).also { files++ }
-                            else -> Unit // habits, baselines, deviations are recomputed
+                        if (!entry.isDirectory && name.endsWith(".csv", ignoreCase = true)) {
+                            val rows = CsvParser.parseWithHeader(bytes.toString(Charsets.UTF_8))
+                            when {
+                                name.startsWith("app_usage", ignoreCase = true) -> {
+                                    val imported = importUsage(rows)
+                                    usage += imported.count
+                                    hiddenNames = hiddenNames || imported.hiddenNames
+                                    files++
+                                }
+                                name.startsWith("context_snapshots", ignoreCase = true) -> snapshots += importSnapshots(rows).also { files++ }
+                                name.startsWith("labels", ignoreCase = true) -> labels += importLabels(rows).also { files++ }
+                                name.startsWith("places", ignoreCase = true) -> places += importPlaces(rows).also { files++ }
+                                name.startsWith("device_events", ignoreCase = true) -> importDeviceEvents(rows).also { files++ }
+                                else -> Unit // habits, baselines, deviations are recomputed
+                            }
                         }
+                        zip.closeEntry()
                     }
                 }
                 Result(usage, snapshots, labels, places, files, hiddenNames)
             }
 
-        private suspend fun importUsage(rows: List<Map<String, String>>): Int {
+        private suspend fun importUsage(rows: List<Map<String, String>>): UsageImportResult {
             // A privacy-safe export replaces packages with codes like app_3f9a1c02de; restoring
             // those would fill the history with apps that don't exist.
             val coded = Regex("^app_[0-9a-f]{10}$")
             if (rows.isNotEmpty() && rows.all { coded.matches(it["packageName"].orEmpty()) }) {
-                hiddenNames = true
-                return 0
+                return UsageImportResult(0, hiddenNames = true)
             }
             val parsed =
                 rows.mapNotNull { r ->
@@ -98,7 +128,7 @@ class ImportManager
                     }.getOrNull()
                 }
             parsed.chunked(500).forEach { appUsageDao.insertAll(it) }
-            return parsed.size
+            return UsageImportResult(parsed.size, hiddenNames = false)
         }
 
         private suspend fun importSnapshots(rows: List<Map<String, String>>): Int {
@@ -208,4 +238,11 @@ class ImportManager
             }
             return count
         }
+
+        private companion object {
+            const val MAX_ARCHIVE_ENTRIES = 32
+            const val MAX_ENTRY_BYTES = 32L * 1024 * 1024
+            const val MAX_TOTAL_UNCOMPRESSED_BYTES = 128L * 1024 * 1024
+        }
     }
+}
