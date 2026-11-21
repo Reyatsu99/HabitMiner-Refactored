@@ -34,7 +34,15 @@ enum class PatternKind {
     MORNING_APP,
     LATE_RECORD,
     LATE_FREE_RUN,
+    NOTIFICATION_NOISE,
 }
+
+/** A notification leaving the shade: "opened", "dismissed", "dismissed_all", "app" (the app withdrew it)… */
+data class NotificationRemoval(
+    val time: Long,
+    val packageName: String,
+    val reason: String,
+)
 
 /**
  * Something true about how you use your phone, found in your own data and only shown when it
@@ -217,6 +225,10 @@ object PatternFinder {
         today: LocalDate,
         now: Long,
         zone: ZoneId,
+        /** Notifications leaving the shade, for "notification noise". */
+        removals: List<NotificationRemoval> = emptyList(),
+        /** App names for packages you may not have used lately. */
+        appName: (String) -> String = { it },
     ): List<Pattern> {
         val from = TimeUtil.startOfDay(today.minusDays(WINDOW_DAYS), zone)
         val recent = sessions.filter { it.start >= from && it.start < now }
@@ -233,6 +245,11 @@ object PatternFinder {
         runCatching { checkingPeak(visits, days, notifications.filter { it.time >= from }, zone)?.let { out += it } }
         runCatching { morningApp(visits, nights)?.let { out += it } }
         runCatching { out += lateNights(visits, today, now, zone) }
+        runCatching {
+            val pulled = out.filter { it.kind == PatternKind.NOTIFICATION_PULL }.mapNotNull { it.packageName }.toSet()
+            val names = visits.associate { it.packageName to it.appName }
+            out += notificationNoise(removals.filter { it.time >= from && it.packageName !in pulled }, days) { names[it] ?: appName(it) }
+        }
         return out.sortedByDescending { it.strength }
     }
 
@@ -354,7 +371,7 @@ object PatternFinder {
             else -> n.dropLast(1).joinToString(", ") + " and " + n.last()
         }
 
-    /** "YouTube and Evony", for buttons. */
+    /** "YouTube and Instagram", for buttons. */
     fun appNames(apps: List<Pair<String, String>>): String = names(apps.map { it.second })
 
     // ---- This week against the week before ----------------------------------------------
@@ -380,7 +397,7 @@ object PatternFinder {
             out +=
                 Pattern(
                     kind = PatternKind.WEEK_CHANGE,
-                    key = "WEEK|$today",
+                    key = "WEEK|${week(today)}",
                     title = "This week: ${Format.duration(kotlin.math.abs(c - p))} a day ${if (up) "more" else "less"} than the week before",
                     detail = "${Format.duration(c)} a day over the last 7 days, ${Format.duration(p)} the 7 before.",
                     fresh = true,
@@ -405,7 +422,7 @@ object PatternFinder {
             out +=
                 Pattern(
                     kind = PatternKind.APP_WEEK_CHANGE,
-                    key = "APPWEEK|$pkg|$today",
+                    key = "APPWEEK|$pkg|${week(today)}",
                     title = "$name ${if (up) "up" else "down"} ${Format.percent(kotlin.math.abs(a - b).toFloat() / b)} this week",
                     detail = "${Format.duration(a)} a day over the last 7 days, from ${Format.duration(b)} the 7 before.",
                     packageName = pkg,
@@ -469,6 +486,45 @@ object PatternFinder {
                 appName = name,
                 action = PatternAction.APP_NOTIFICATIONS,
                 strength = (0.5f + (share - baseShare)).coerceAtMost(0.95f),
+            )
+        }
+    }
+
+    // ---- Notifications you never open ---------------------------------------------------
+
+    /**
+     * Apps whose notifications you clear (one by one or with "clear all") and almost never open.
+     * Notifications the app withdrew itself don't count either way: that's the app tidying up.
+     * System notices, the alarm clock and HabitMiner's own are left out.
+     */
+    private fun notificationNoise(
+        removals: List<NotificationRemoval>,
+        days: Int,
+        name: (String) -> String,
+    ): List<Pattern> {
+        if (days < 7) return emptyList()
+        return removals.groupBy { it.packageName }.mapNotNull { (pkg, rs) ->
+            val n = name(pkg)
+            if (CategoryMapper.isSystemNoise(pkg, n) || AlarmApps.isAlarmApp(pkg, n) || pkg.startsWith("com.habitminer") ||
+                pkg.contains("systemui") || pkg.contains("networkstack") || pkg.startsWith("com.android.") && !pkg.contains("chrome") || pkg == "android"
+            ) {
+                return@mapNotNull null
+            }
+            val opened = rs.count { it.reason == "opened" }
+            val cleared = rs.count { it.reason == "dismissed" || it.reason == "dismissed_all" }
+            if (cleared < 15 || opened > (opened + cleared) / 10) return@mapNotNull null
+            Triple(pkg, n, opened to cleared)
+        }.sortedByDescending { it.third.second }.take(2).map { (pkg, n, oc) ->
+            val (opened, cleared) = oc
+            Pattern(
+                kind = PatternKind.NOTIFICATION_NOISE,
+                key = "NOISE|$pkg",
+                title = "You cleared $cleared notifications from $n in four weeks and opened " + (if (opened == 0) "none" else "only $opened"),
+                detail = "About ${Math.round(cleared.toFloat() / days)} a day, swiped away or cleared with the rest. Ones $n withdrew by itself aren't counted.",
+                packageName = pkg,
+                appName = n,
+                action = PatternAction.APP_NOTIFICATIONS,
+                strength = (0.5f + cleared / 1000f).coerceAtMost(0.8f),
             )
         }
     }
@@ -606,6 +662,8 @@ object PatternFinder {
             appName = action?.value?.first()?.appName,
             action = if (action != null) PatternAction.APP_NOTIFICATIONS else PatternAction.NONE,
             strength = 0.45f,
+            // The ones you open yourself, for the tip (they're helped by an extra step, not by quieter alerts).
+            apps = topApps.filter { (nudged[it.key] ?: 0f) < 0.15f }.map { it.key to it.value.first().appName },
         )
     }
 
@@ -658,7 +716,7 @@ object PatternFinder {
                 out +=
                     Pattern(
                         kind = PatternKind.LATE_RECORD,
-                        key = "LATEREC|$today",
+                        key = "LATEREC",
                         title = "Last night: ${Format.duration(lastNight.ms)} in ${lastNight.appName}, your longest late session in two weeks",
                         detail = "From ${Format.clock(lastNight.start, zone)}. The longest one after midnight in the 14 nights before was ${Format.duration(prior)}.",
                         packageName = lastNight.packageName,
@@ -684,7 +742,7 @@ object PatternFinder {
             out +=
                 Pattern(
                     kind = PatternKind.LATE_FREE_RUN,
-                    key = "LATEFREE|$today",
+                    key = "LATEFREE",
                     title = "$run nights in a row without a long session after midnight",
                     detail = "Before that, $usual of ${earlier.size} nights had one.",
                     fresh = true,
@@ -790,23 +848,25 @@ object PatternFinder {
         val usual = before.map { daily[it] ?: 0L }.sorted().let { if (it.size >= 7) it[it.size / 2] else null }
         val mine = pauses.filter { it.first >= since }
         val afterMs = after.takeIf { it.isNotEmpty() }?.map { daily[it] ?: 0L }?.sorted()?.let { it[it.size / 2] }
-        // Did the time just move to other leisure apps? Means over the same days, and only
-        // clear changes (10+ min a day both ways), so ordinary noise doesn't read as a shift.
+        // Did the time just move to other leisure apps? Medians, like this app's own numbers, so
+        // one unusual day can't fake a shift; and only clear changes (10+ min a day both ways).
         var spill: Long? = null
         var spillApp: Pair<String, Long>? = null
         var noSpill = false
         val down = if (afterMs != null && usual != null) usual - afterMs else 0L
         if (after.size >= IMPACT_MIN_DAYS && before.size >= 7 && down >= 10 * TimeUtil.MINUTE && otherLeisure.isNotEmpty()) {
-            fun mean(
+            fun median(
                 m: Map<LocalDate, Long>,
                 ds: List<LocalDate>,
-            ) = ds.sumOf { m[it] ?: 0L } / ds.size
-            val change = otherLeisure.mapValues { (_, m) -> mean(m, after) - mean(m, before) }
-            val total = change.values.sum()
+            ) = ds.map { m[it] ?: 0L }.sorted()[ds.size / 2]
+            // The total of the other leisure apps per day, then its median.
+            val totalByDay = (after + before).associateWith { d -> otherLeisure.values.sumOf { it[d] ?: 0L } }
+            val total = median(totalByDay, after) - median(totalByDay, before)
+            val change = otherLeisure.mapValues { (_, m) -> median(m, after) - median(m, before) }
             if (total >= 10 * TimeUtil.MINUTE) {
                 spill = total
                 spillApp = change.entries.maxByOrNull { it.value }?.takeIf { it.value >= 5 * TimeUtil.MINUTE }?.let { it.key to it.value }
-            } else if (total < 10 * TimeUtil.MINUTE) {
+            } else {
                 noSpill = true
             }
         }
@@ -835,6 +895,10 @@ object PatternFinder {
         val best = (0 until 24).maxBy { c[it] + c[(it + 1) % 24] + c[(it + 2) % 24] }
         return best to (c[best] + c[(best + 1) % 24] + c[(best + 2) % 24]).toFloat() / hours.size
     }
+
+    /** "2026-W47": week-scoped keys, so hiding a weekly pattern lasts the week. */
+    private fun week(d: LocalDate) =
+        String.format(java.util.Locale.US, "%d-W%02d", d.get(java.time.temporal.IsoFields.WEEK_BASED_YEAR), d.get(java.time.temporal.IsoFields.WEEK_OF_WEEK_BASED_YEAR))
 
     private fun hh(h: Int) = String.format(java.util.Locale.US, "%02d:00", Math.floorMod(h, 24))
 

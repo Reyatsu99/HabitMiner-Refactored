@@ -124,7 +124,7 @@ private fun storyPalette(kind: StoryCard.Kind): Triple<androidx.compose.ui.graph
         StoryCard.Kind.SLEEP -> Triple(c(0xFF3730A3), c(0xFF8B5CF6), white)
         StoryCard.Kind.MILESTONES -> Triple(c(0xFFEAB308), c(0xFFFDE047), c(0xFF1F1A00))
         StoryCard.Kind.PATTERN -> Triple(c(0xFF0E7490), c(0xFF22D3EE), white)
-        StoryCard.Kind.GOALS -> Triple(c(0xFF15803D), c(0xFF4ADE80), white)
+        StoryCard.Kind.GOALS -> Triple(c(0xFF14532D), c(0xFF16A34A), white)
         StoryCard.Kind.EXPERIMENT -> Triple(c(0xFF7E22CE), c(0xFFD946EF), white)
     }
 }
@@ -152,6 +152,10 @@ private fun StoryCardView(card: StoryCard) {
         Spacer(Modifier.height(12.dp))
         if (card.body.isNotEmpty()) {
             Text(card.body, style = MaterialTheme.typography.bodyLarge, color = onColor.copy(alpha = 0.9f))
+        }
+        card.tip?.let {
+            Spacer(Modifier.height(12.dp))
+            Text("Try this: $it", style = MaterialTheme.typography.bodyLarge, color = onColor)
         }
         card.pattern?.let { p -> TryButton(p, onColor) }
         if (card.bars.isNotEmpty()) {
@@ -256,31 +260,25 @@ private fun TryButton(
     val guards = com.habitminer.ui.design.LocalAppGuards.current ?: return
     val context = androidx.compose.ui.platform.LocalContext.current
     var started by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    val step = com.habitminer.ui.today.guardStep(p, guards, context, onOpenSleep = {}) ?: return
     Spacer(Modifier.height(16.dp))
     if (started) {
-        Text("Started. Next Sunday's Story shows how it went.", style = MaterialTheme.typography.titleSmall, color = onColor)
+        Text(
+            when {
+                step.pauses.isEmpty() -> "Done. If it still pulls you in, it'll stay in Your patterns."
+                guards.pauseWorks -> "Started. Next Sunday's Story shows how it went."
+                else -> "Added. One step left: turn on the pause in Accessibility (HabitMiner opened it for you)."
+            },
+            style = MaterialTheme.typography.titleSmall,
+            color = onColor,
+        )
         return
     }
     androidx.compose.material3.Button(
         onClick = {
-            when (p.action) {
-                com.habitminer.analytics.PatternAction.PAUSE_APPS_AT_NIGHT -> p.apps.forEach { (pkg, _) -> guards.onGuard(com.habitminer.ui.design.GuardRequest(pkg, true, p.nightFromMinute ?: 23 * 60, true, p.title)) }
-                com.habitminer.analytics.PatternAction.PAUSE_APP_AT_NIGHT -> p.packageName?.let { guards.onGuard(com.habitminer.ui.design.GuardRequest(it, true, p.nightFromMinute ?: 23 * 60, reason = p.title)) }
-                com.habitminer.analytics.PatternAction.PAUSE_APP -> p.packageName?.let { guards.onGuard(com.habitminer.ui.design.GuardRequest(it, true, reason = p.title)) }
-                com.habitminer.analytics.PatternAction.APP_NOTIFICATIONS ->
-                    p.packageName?.let { pkg ->
-                        runCatching {
-                            context.startActivity(
-                                android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-                                    .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, pkg)
-                                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
-                            )
-                        }
-                    }
-                else -> Unit
-            }
+            step.run()
             started = true
         },
         colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = onColor, contentColor = androidx.compose.ui.graphics.Color(0xFF151518)),
-    ) { Text("Try it for 7 days") }
+    ) { Text(if (step.pauses.isEmpty()) step.label else "Try it for 7 days") }
 }

@@ -16,8 +16,8 @@ android {
         applicationId "com.habitminer.extended"
         minSdk 26           // Android 8.0 — required for WorkManager background execution guarantees
         targetSdk 35
-        versionCode((project.findProperty("vcode") ?: "240").toString().toInteger())
-        versionName((project.findProperty("vname") ?: "2.4.0-dev").toString())
+        versionCode((project.findProperty("vcode") ?: "260").toString().toInteger())
+        versionName((project.findProperty("vname") ?: "2.6.0-dev").toString())
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

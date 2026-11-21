@@ -18,6 +18,8 @@ data class StoryCard(
     val bars: List<Pair<String, Long>> = emptyList(),
     /** For "Try this week": the pattern whose action the card offers to start. */
     val pattern: Pattern? = null,
+    /** One thing to try, if there is one. */
+    val tip: String? = null,
 ) {
     enum class Kind { WEEK, PHONE_FREE, ROUTINE, CHANGE, SLEEP, MILESTONES, PATTERN, GOALS, EXPERIMENT }
 }
@@ -70,18 +72,29 @@ object WeeklyStoryBuilder {
         val prevDays = days.map { it.minusDays(7) }
         val prevTotals = prevDays.mapNotNull { d -> byDay[d]?.sumOf { it.durationMs }?.takeIf { it > 0 } }
         val prevAvg = if (prevTotals.size >= 3) prevTotals.sum() / prevTotals.size else null
+        val fullDay = { d: LocalDate -> d.dayOfWeek.getDisplayName(TextStyle.FULL, Locale.getDefault()) }
+        val lightestDay = withData.minByOrNull { it.second }?.first
+        val heaviestDay = withData.maxByOrNull { it.second }?.first
+        val lighter = prevAvg != null && avg < prevAvg - 10 * TimeUtil.MINUTE
+        val heavier = prevAvg != null && avg > prevAvg + 10 * TimeUtil.MINUTE
         cards +=
             StoryCard(
                 StoryCard.Kind.WEEK,
                 "Your week",
-                "${Format.duration(avg)} a day",
                 when {
-                    prevAvg == null -> "Across ${withData.size} days with data."
-                    avg < prevAvg -> "${Format.duration(prevAvg - avg)} a day less than the week before."
-                    avg > prevAvg -> "${Format.duration(avg - prevAvg)} a day more than the week before."
-                    else -> "About the same as the week before."
-                } + (withData.minByOrNull { it.second }?.let { " Lightest day: ${shortDay(it.first)}." } ?: ""),
+                    lighter -> "A lighter week: ${Format.duration(avg)} a day, ${Format.duration(prevAvg!! - avg)} less than the week before."
+                    heavier -> "A heavier week: ${Format.duration(avg)} a day, ${Format.duration(avg - prevAvg!!)} more than the week before."
+                    else -> "About ${Format.duration(avg)} a day on your phone, much like the week before."
+                },
+                when {
+                    lighter ->
+                        "Lightest on ${lightestDay?.let(fullDay)}. Changes that stick usually come from the situation (where the phone was, what else you were doing) more than from willpower."
+                    heavier ->
+                        "Heaviest on ${heaviestDay?.let(fullDay)}. Busy, stressful or bored weeks often show up like this: the phone fills the gaps. It's a signal, not a failure."
+                    else -> "Your heaviest day was ${heaviestDay?.let(fullDay)} and your lightest ${lightestDay?.let(fullDay)}."
+                },
                 bars = totals.map { shortDay(it.first) to it.second },
+                tip = if (lighter) "Think of one thing that made it easier, and keep it going." else if (heavier) "Look at what filled the time on ${heaviestDay?.let(fullDay)}." else null,
             )
 
         // 2. Phone-free best.
@@ -95,9 +108,10 @@ object WeeklyStoryBuilder {
             cards +=
                 StoryCard(
                     StoryCard.Kind.PHONE_FREE,
-                    "Longest phone-free stretch",
-                    Format.duration(best.durationMs),
-                    "${d.dayOfWeek.getDisplayName(TextStyle.FULL, Locale.getDefault())}, ${Format.clock(best.start, zone)} to ${Format.clock(best.end, zone)}, awake and not using the phone.",
+                    "Your longest break",
+                    "Your longest break from the phone was ${Format.duration(best.durationMs)}, on ${d.dayOfWeek.getDisplayName(TextStyle.FULL, Locale.getDefault())}.",
+                    "${Format.clock(best.start, zone)} to ${Format.clock(best.end, zone)}, awake and not using it. Stretches like this are when your attention gets to rest.",
+                    tip = "Notice what you were doing then: it's the easiest thing to repeat.",
                 )
         }
 
@@ -106,9 +120,9 @@ object WeeklyStoryBuilder {
             cards +=
                 StoryCard(
                     StoryCard.Kind.ROUTINE,
-                    "A routine you kept",
-                    g.sequence,
-                    "${g.whenText}. ${g.evidenceText}.",
+                    "A routine you repeat",
+                    "${g.whenText}, you tend to go ${g.sequence}.",
+                    "Routines like this run on autopilot: one app cues the next without you deciding. Knowing it is the first step if you'd like to change it.",
                 )
         }
 
@@ -127,9 +141,12 @@ object WeeklyStoryBuilder {
                     StoryCard(
                         StoryCard.Kind.CHANGE,
                         "Biggest change",
-                        "$app ${if (delta < 0) "−" else "+"}${Format.duration(kotlin.math.abs(delta))} a day",
-                        "${Format.duration(now7[app] ?: 0L)} a day this week, ${Format.duration(prev7[app] ?: 0L)} the week before." +
-                            if (goal && delta < 0) " That's one of the apps you wanted to use less." else "",
+                        "$app took ${Format.duration(kotlin.math.abs(delta))} a day ${if (delta < 0) "less" else "more"} this week.",
+                        when {
+                            goal && delta < 0 -> "That's one you wanted to use less, so it's working."
+                            delta < 0 -> "Something else filled that time. Whatever it was, it changed your week more than anything else."
+                            else -> "Worth asking honestly: did you choose that, or did it just happen?"
+                        },
                     )
             }
         }
@@ -144,9 +161,13 @@ object WeeklyStoryBuilder {
                 StoryCard(
                     StoryCard.Kind.SLEEP,
                     "Sleep",
-                    "${Format.duration(avgNight)} a night",
-                    "Usually asleep around ${Format.clockFromMinutes(beds.average().toInt())}" +
-                        if (spread <= 60) ", within an hour each night. Steady." else ", varying by ${Format.duration(spread * TimeUtil.MINUTE)} across the week.",
+                    "You slept about ${Format.duration(avgNight)} a night.",
+                    if (spread <= 60) {
+                        "You fell asleep around ${Format.clockFromMinutes(beds.average().toInt())}, within an hour each night. A steady bedtime is one of the simplest things that helps sleep."
+                    } else {
+                        "Your bedtime moved by ${Format.duration(spread * TimeUtil.MINUTE)} across the week. A bedtime that keeps shifting works like a small jet lag: mornings feel harder even with the same hours."
+                    },
+                    tip = if (spread > 60) "Pick one bedtime for weeknights and keep it for a week." else null,
                 )
         }
 
@@ -171,7 +192,9 @@ object WeeklyStoryBuilder {
         val win = found.firstOrNull { it.kind == PatternKind.LATE_FREE_RUN }
         val pick = win ?: found.firstOrNull { !it.fresh }
         pick?.let { p ->
-            cards += StoryCard(StoryCard.Kind.PATTERN, if (win != null) "A good run" else "A pattern of yours", p.title, p.detail)
+            Explainer.explain(p)?.let { e ->
+                cards += StoryCard(StoryCard.Kind.PATTERN, e.kicker, e.headline, e.meaning, pattern = p.takeIf { it.action != PatternAction.NONE }, tip = e.tip)
+            }
         }
 
         // 8. Is it working? Use less apps with a fair comparison, biggest drop first; the
@@ -223,7 +246,7 @@ object WeeklyStoryBuilder {
         useLess: Set<String>,
     ): StoryCard? {
         val order =
-            listOf(PatternKind.LATE_WEEKDAY_SLEEP, PatternKind.LONG_SESSIONS, PatternKind.NOTIFICATION_PULL, PatternKind.CHECKING_PEAK, PatternKind.LEAD_IN)
+            listOf(PatternKind.LATE_WEEKDAY_SLEEP, PatternKind.LONG_SESSIONS, PatternKind.NOTIFICATION_PULL, PatternKind.NOTIFICATION_NOISE, PatternKind.CHECKING_PEAK, PatternKind.LEAD_IN)
         val open =
             found.filter { p ->
                 when (p.action) {
@@ -241,13 +264,14 @@ object WeeklyStoryBuilder {
                 PatternAction.APP_NOTIFICATIONS -> "Quieter ${p.appName} notifications"
                 else -> "A pause before ${p.appName}"
             }
+        val e = Explainer.explain(p)
         return StoryCard(
             StoryCard.Kind.EXPERIMENT,
             "Try this week",
             headline,
-            "Why: ${p.title.replaceFirstChar { it.lowercase() }}. " +
+            (e?.headline?.let { "$it " } ?: "") +
                 if (p.action == PatternAction.APP_NOTIFICATIONS) {
-                    "Turn its notifications down for 7 days and see whether the long sessions drop."
+                    "Turning its notifications down takes a minute; if it still pulls you in, it'll stay in Your patterns."
                 } else {
                     "Try it for 7 days; next Sunday's Story shows whether it worked."
                 },

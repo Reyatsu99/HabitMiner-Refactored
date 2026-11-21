@@ -110,6 +110,8 @@ data class InsightsBundle(
     val impacts: Map<String, com.habitminer.analytics.GoalImpact> = emptyMap(),
     /** Exposure-adjusted app/context associations over the full analysis window. */
     val contextRelationships: List<ContextRelationship> = emptyList(),
+    /** The last seven days as a story, for the "Your week" bubble on Today. */
+    val weekStory: com.habitminer.analytics.WeeklyStory? = null,
 ) {
     /** Today's sleep: the night that ended this morning plus today's confirmed naps. */
     val sleepToday: DailySleep? get() = sleepDays.lastOrNull()?.takeIf { it.date == java.time.Instant.ofEpochMilli(computedAt).atZone(ZoneId.systemDefault()).toLocalDate() }
@@ -261,7 +263,15 @@ class InsightsComputer
             val patterns =
                 runCatching {
                     val hidden = patternPrefs.hidden.value
-                    com.habitminer.analytics.PatternFinder.find(roled, notificationEvents, unlocks, routine.nights, today, now, zone)
+                    val removals =
+                        contextRepository.getDeviceEventsSince(DeviceEvents.NOTIFICATION_REMOVED, horizon).mapNotNull { e ->
+                            e.packageName?.let { com.habitminer.analytics.NotificationRemoval(e.timestamp, it, DeviceEvents.detailValue(e.detail, "reason") ?: "") }
+                        }
+                    com.habitminer.analytics.PatternFinder.find(
+                        roled, notificationEvents, unlocks, routine.nights, today, now, zone,
+                        removals = removals,
+                        appName = appIdentityResolver::getAppName,
+                    )
                         .filterNot { it.key in hidden }
                         // Nothing to act on for an app that's no longer installed.
                         .filter { p -> p.packageName?.let(appIdentityResolver::isInstalled) ?: true }
@@ -348,6 +358,23 @@ class InsightsComputer
                 coverage = coverage,
                 patterns = patterns,
                 impacts = impacts,
+                weekStory =
+                    runCatching {
+                        com.habitminer.analytics.WeeklyStoryBuilder.build(
+                            sessions = sessions,
+                            unlocks = unlocks,
+                            nights = routine.nights,
+                            naps = routine.confirmedNaps,
+                            patterns = patternGroups,
+                            dailyTargetMinutes = goals.dailyTargetMinutes,
+                            useLess = goals.useLess.toSet(),
+                            today = today,
+                            now = now,
+                            zone = zone,
+                            found = patterns,
+                            goals = impacts.map { (pkg, im) -> appIdentityResolver.getAppName(pkg) to im },
+                        )
+                    }.getOrNull(),
                 mood =
                     com.habitminer.analytics.MoodPatterns.compute(
                         labels.filter { it.kind == UserLabelEntity.KIND_MOOD }.mapNotNull { com.habitminer.analytics.MoodPatterns.parse(it.timestamp, it.value) },

@@ -221,6 +221,42 @@ class MainActivity : ComponentActivity() {
         androidx.lifecycle.compose.LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) { resumeTick++ }
         val pauseEnabled = androidx.compose.runtime.remember(resumeTick, goals) { com.habitminer.mindful.MindfulPause.enabled(this) }
         val serviceOn = androidx.compose.runtime.remember(resumeTick) { com.habitminer.mindful.MindfulPause.serviceOn(this) }
+        // Put apps on Use less (with a pause, maybe only at night), all in one go, then if the
+        // pause can't work yet, show the way to Android's switch once, not once per app.
+        val applyGuards: (List<com.habitminer.ui.design.GuardRequest>) -> Unit = { requests ->
+            goalsStore.update { start ->
+                requests.fold(start) { g, r ->
+                    val pkg = r.packageName
+                    g.copy(
+                        useLess = (g.useLess - pkg) + pkg,
+                        useMore = g.useMore - pkg,
+                        pauseFrom = if (r.nightFrom != null) g.pauseFrom + (pkg to r.nightFrom) else if (r.pause) g.pauseFrom - pkg else g.pauseFrom,
+                        weeknightsOnly =
+                            when {
+                                r.nightFrom != null -> if (r.weeknightsOnly) g.weeknightsOnly + pkg else g.weeknightsOnly - pkg
+                                r.pause -> g.weeknightsOnly - pkg
+                                else -> g.weeknightsOnly
+                            },
+                        reasons = r.reason?.let { g.reasons + (pkg to it) } ?: g.reasons,
+                    )
+                }
+            }
+            if (requests.any { it.pause }) {
+                val firstTime = !com.habitminer.mindful.MindfulPause.enabled(this)
+                com.habitminer.mindful.MindfulPause.setEnabled(this, true)
+                if (!com.habitminer.mindful.MindfulPause.serviceOn(this)) {
+                    // On Android 13+ a downloaded app's Accessibility switch is greyed out until
+                    // it's allowed, so go to Settings, which explains how. Earlier Android: the
+                    // switch itself, the first time.
+                    if (!firstTime || android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                        nav.navigate(ROUTE_SETTINGS) { launchSingleTop = true }
+                    } else {
+                        runCatching { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+                    }
+                }
+            }
+            resumeTick++
+        }
         val guards =
             com.habitminer.ui.design.AppGuards(
                 useLess = goals.useLess.toSet(),
@@ -228,37 +264,8 @@ class MainActivity : ComponentActivity() {
                 serviceOn = serviceOn,
                 pauseFrom = goals.pauseFrom,
                 weeknightsOnly = goals.weeknightsOnly,
-                onGuard = { r ->
-                    val pkg = r.packageName
-                    val pause = r.pause
-                    goalsStore.update { g ->
-                        g.copy(
-                            useLess = (g.useLess - pkg) + pkg,
-                            useMore = g.useMore - pkg,
-                            pauseFrom = if (r.nightFrom != null) g.pauseFrom + (pkg to r.nightFrom) else if (pause) g.pauseFrom - pkg else g.pauseFrom,
-                            weeknightsOnly =
-                                when {
-                                    r.nightFrom != null -> if (r.weeknightsOnly) g.weeknightsOnly + pkg else g.weeknightsOnly - pkg
-                                    pause -> g.weeknightsOnly - pkg
-                                    else -> g.weeknightsOnly
-                                },
-                            reasons = r.reason?.let { g.reasons + (pkg to it) } ?: g.reasons,
-                        )
-                    }
-                    if (pause) {
-                        com.habitminer.mindful.MindfulPause.setEnabled(this, true)
-                        if (!com.habitminer.mindful.MindfulPause.serviceOn(this)) {
-                            // First time: straight to Android's switch. If that's blocked
-                            // (restricted settings), Settings explains how to allow it.
-                            if (pauseEnabled) {
-                                nav.navigate(ROUTE_SETTINGS) { launchSingleTop = true }
-                            } else {
-                                runCatching { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
-                            }
-                        }
-                    }
-                    resumeTick++
-                },
+                onGuard = { r -> applyGuards(listOf(r)) },
+                onGuardAll = applyGuards,
                 onOpenGoals = { nav.goTab(Tab.GOALS.route) },
             )
         // A bottom bar on phones, a rail on wider screens.

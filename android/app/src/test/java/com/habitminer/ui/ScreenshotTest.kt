@@ -112,9 +112,9 @@ class ScreenshotTest {
     private fun samplePatterns(): List<com.habitminer.analytics.Pattern> {
         return listOf(
             com.habitminer.analytics.Pattern(
-                com.habitminer.analytics.PatternKind.LONG_SESSIONS, "LONG|com.drifty.yt", "2 long YT (drifty) sessions a day make up 63% of its time",
+                com.habitminer.analytics.PatternKind.LONG_SESSIONS, "LONG|com.google.android.youtube", "2 long YouTube sessions a day make up 63% of its time",
                 "Sessions of 15 minutes or more, mostly starting between 00:00 and 03:00. The other 8 visits a day are mostly quick checks under 2 minutes.",
-                "com.drifty.yt", "YT (drifty)", com.habitminer.analytics.PatternAction.PAUSE_APP_AT_NIGHT, 23 * 60, strength = 0.95f,
+                "com.google.android.youtube", "YouTube", com.habitminer.analytics.PatternAction.PAUSE_APP_AT_NIGHT, 23 * 60, strength = 0.95f,
             ),
             com.habitminer.analytics.Pattern(
                 com.habitminer.analytics.PatternKind.WEEK_CHANGE, "WEEK", "This week: 1h 17m a day less than the week before",
@@ -122,14 +122,14 @@ class ScreenshotTest {
             ),
             com.habitminer.analytics.Pattern(
                 com.habitminer.analytics.PatternKind.LATE_WEEKDAY_SLEEP, "LATE_SLEEP", "Late weekday nights cost you about 1h 24m of sleep",
-                "On weekday nights you fell asleep after about 03:20, you slept 6h 10m instead of 7h 34m: you woke 24m later. Most of your long sessions after 23:00 are in YT (drifty) and Snapchat.",
+                "On weekday nights you fell asleep after about 03:20, you slept 6h 10m instead of 7h 34m: you woke 24m later. Most of your long sessions after 23:00 are in YouTube and Snapchat.",
                 action = com.habitminer.analytics.PatternAction.PAUSE_APPS_AT_NIGHT, nightFromMinute = 23 * 60, strength = 0.9f,
-                apps = listOf("com.drifty.yt" to "YT (drifty)", "com.snapchat.android" to "Snapchat"),
+                apps = listOf("com.google.android.youtube" to "YouTube", "com.snapchat.android" to "Snapchat"),
             ),
             com.habitminer.analytics.Pattern(
-                com.habitminer.analytics.PatternKind.NOTIFICATION_PULL, "NOTE|com.topgames.evony", "Evony notifications often pull you in",
-                "When your phone use starts with a notification from Evony, you stay 15 minutes or more 33% of the time (30 of 91). Without a notification it's 10%.",
-                "com.topgames.evony", "Evony", com.habitminer.analytics.PatternAction.APP_NOTIFICATIONS, strength = 0.75f,
+                com.habitminer.analytics.PatternKind.NOTIFICATION_PULL, "NOTE|com.example.castlesiege", "Castle Siege notifications often pull you in",
+                "When your phone use starts with a notification from Castle Siege, you stay 15 minutes or more 33% of the time (30 of 91). Without a notification it's 10%.",
+                "com.example.castlesiege", "Castle Siege", com.habitminer.analytics.PatternAction.APP_NOTIFICATIONS, strength = 0.75f,
             ),
             com.habitminer.analytics.Pattern(
                 com.habitminer.analytics.PatternKind.CHECKING_PEAK, "CHECKS", "You open an app about every 4 minutes, all day",
@@ -300,9 +300,9 @@ class ScreenshotTest {
                     found = samplePatterns(),
                     goals =
                         listOf(
-                            "Evony" to
+                            "Castle Siege" to
                                 com.habitminer.analytics.GoalImpact(
-                                    "com.topgames.evony", data.now - 8 * TimeUtil.DAY, days = 7, pauses = 23, closed = 15, openedAnyway = 7,
+                                    "com.example.castlesiege", data.now - 8 * TimeUtil.DAY, days = 7, pauses = 23, closed = 15, openedAnyway = 7,
                                     afterPerDayMs = 104 * 60_000L, beforePerDayMs = 139 * 60_000L, noSpillover = true,
                                 ),
                         ),
@@ -328,9 +328,9 @@ class ScreenshotTest {
                     found = samplePatterns(),
                     goals =
                         listOf(
-                            "Evony" to
+                            "Castle Siege" to
                                 com.habitminer.analytics.GoalImpact(
-                                    "com.topgames.evony", data.now - 8 * TimeUtil.DAY, days = 7, pauses = 23, closed = 15, openedAnyway = 7,
+                                    "com.example.castlesiege", data.now - 8 * TimeUtil.DAY, days = 7, pauses = 23, closed = 15, openedAnyway = 7,
                                     afterPerDayMs = 104 * 60_000L, beforePerDayMs = 139 * 60_000L, noSpillover = true,
                                 ),
                         ),
@@ -521,6 +521,78 @@ class ScreenshotTest {
         val slides = com.habitminer.analytics.Explainer.lastNight(ins.lastNight!!, ins.sleepWeek?.avgNightMs, ins.sleepWeek?.avgBedtimeMinutes, SampleData.zone)
         story("33_story_last_night", slides.first(), 0, slides.size)
     }
+
+    private fun weekStory() =
+        com.habitminer.analytics.WeeklyStoryBuilder.build(
+            sessions = data.sessions,
+            unlocks = data.unlocks,
+            nights = data.state.insights?.sleepNights.orEmpty(),
+            naps = data.state.insights?.confirmedNaps.orEmpty(),
+            patterns = data.state.insights?.patternGroups.orEmpty(),
+            dailyTargetMinutes = 240,
+            useLess = data.state.appSummaries.take(1).map { it.packageName }.toSet(),
+            today = java.time.LocalDate.of(2026, 10, 3),
+            now = data.now,
+            zone = SampleData.zone,
+            found = samplePatterns(),
+        )
+
+    /** Today with stories and today's insight card; [read] marks all three as watched. */
+    private fun todayStories(
+        name: String,
+        read: Boolean,
+    ) {
+        val ins = data.state.insights!!
+        val state =
+            data.state.copy(
+                deviationFeedback = kotlinx.collections.immutable.persistentMapOf<String, String>().putAll(ins.deviations.days.associate { it.key to com.habitminer.data.UserLabelEntity.FEEDBACK_EXPECTED }),
+                insights = ins.copy(naps = emptyList(), insight = null, answers = ins.answers + listOfNotNull(ins.deviations.shift?.key?.let { it to "labelled" }), patterns = samplePatterns(), weekStory = weekStory()),
+            )
+        if (read) {
+            val day = java.time.LocalDate.of(2026, 10, 3)
+            val ctx = androidx.test.core.app.ApplicationProvider.getApplicationContext<Application>()
+            val ids = com.habitminer.analytics.Explainer.today(samplePatterns(), day).joinToString(",") { it.id }
+            com.habitminer.ui.today.StorySeen.mark(ctx, "today", "$day|$ids")
+            com.habitminer.ui.today.StorySeen.mark(ctx, "night", day.toString())
+            com.habitminer.ui.today.StorySeen.mark(ctx, "week", day.with(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY)).toString())
+        }
+        shoot(name, dark = false) { TodayScreen(state, NoActions, NoNav, dailyTargetMinutes = 240, now = data.now) }
+    }
+
+    @Test
+    fun todayStoriesUnread() = todayStories("34_today_stories_unread", read = false)
+
+    @Test
+    fun todayStoriesRead() = todayStories("35_today_stories_read", read = true)
+
+    @Test
+    fun storyWeek() {
+        val slides = com.habitminer.analytics.Explainer.week(weekStory()!!)
+        story("36_story_week", slides.first(), 0, slides.size)
+    }
+
+    @Test
+    fun storyWeekTry() {
+        val slides = com.habitminer.analytics.Explainer.week(weekStory()!!)
+        val i = slides.indexOfLast { it.kicker == "Try this week" }.coerceAtLeast(0)
+        story("37_story_week_try", slides[i], i, slides.size)
+    }
+
+    @Test
+    fun storyNoise() =
+        story(
+            "38_story_noise",
+            com.habitminer.analytics.Explainer.explain(
+                com.habitminer.analytics.Pattern(
+                    com.habitminer.analytics.PatternKind.NOTIFICATION_NOISE, "NOISE|com.example.pay",
+                    "You cleared 345 notifications from PayNow in four weeks and opened none",
+                    "About 12 a day, swiped away or cleared with the rest.",
+                    "com.example.pay", "PayNow", com.habitminer.analytics.PatternAction.APP_NOTIFICATIONS,
+                ),
+            )!!,
+            0,
+            2,
+        )
 
     /** Robolectric devices have no sensors; register the five the app uses. */
     private fun registerSensors() {

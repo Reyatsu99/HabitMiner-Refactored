@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -96,7 +98,7 @@ fun storyColors(tone: StoryTone): Pair<Color, Color> =
     when (tone) {
         StoryTone.SCREEN -> Color(0xFFD10A45) to Color(0xFFFF6A93)
         StoryTone.SLEEP -> Color(0xFF3730A3) to Color(0xFF8B5CF6)
-        StoryTone.GOOD -> Color(0xFF15803D) to Color(0xFF4ADE80)
+        StoryTone.GOOD -> Color(0xFF14532D) to Color(0xFF16A34A)
         StoryTone.NOTIFY -> Color(0xFF7E22CE) to Color(0xFFD946EF)
         StoryTone.CHECK -> Color(0xFF0E7490) to Color(0xFF22D3EE)
         StoryTone.CALM -> Color(0xFFC2410C) to Color(0xFFF59E0B)
@@ -198,42 +200,53 @@ fun StoryPage(
                 Text(slide.kicker, style = MaterialTheme.typography.titleSmall, color = Color.White.copy(alpha = 0.9f), modifier = Modifier.weight(1f))
                 IconButton(onClick = onClose) { Icon(Icons.Rounded.Close, contentDescription = "Close", tint = Color.White) }
             }
-            Spacer(Modifier.height(56.dp))
-            Text(slide.headline, style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.SemiBold), color = Color.White)
-            Spacer(Modifier.height(18.dp))
-            Text(slide.meaning, style = MaterialTheme.typography.bodyLarge, color = Color.White.copy(alpha = 0.92f))
-            slide.tip?.let {
-                Spacer(Modifier.height(22.dp))
-                Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Color.White.copy(alpha = 0.16f)).padding(16.dp)) {
-                    Column {
-                        Text("Try this", style = MaterialTheme.typography.labelLarge, color = Color.White.copy(alpha = 0.85f))
-                        Spacer(Modifier.height(4.dp))
-                        Text(it, style = MaterialTheme.typography.bodyLarge, color = Color.White)
-                        StoryAction(slide, onOpenSleep)
+            // Scrolls on small screens or large text, so nothing is ever cut off.
+            Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
+                Spacer(Modifier.height(48.dp))
+                Text(slide.headline, style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.SemiBold), color = Color.White)
+                Spacer(Modifier.height(18.dp))
+                Text(slide.meaning, style = MaterialTheme.typography.bodyLarge, color = Color.White.copy(alpha = 0.92f))
+                if (slide.tip != null || slide.pattern != null) {
+                    Spacer(Modifier.height(22.dp))
+                    Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Color.White.copy(alpha = 0.16f)).padding(16.dp)) {
+                        Column {
+                            slide.tip?.let {
+                                Text("Try this", style = MaterialTheme.typography.labelLarge, color = Color.White.copy(alpha = 0.85f))
+                                Spacer(Modifier.height(4.dp))
+                                Text(it, style = MaterialTheme.typography.bodyLarge, color = Color.White)
+                            }
+                            StoryAction(slide, onOpenSleep = {
+                                onClose()
+                                onOpenSleep()
+                            })
+                        }
                     }
                 }
-            }
-            slide.numbers?.let { n ->
-                Spacer(Modifier.height(8.dp))
-                if (showNumbers) {
-                    Text(n, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.8f))
-                } else {
-                    TextButton(onClick = { showNumbers = true }, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 0.dp)) {
-                        Text("See the numbers", color = Color.White.copy(alpha = 0.85f))
+                slide.numbers?.let { n ->
+                    Spacer(Modifier.height(8.dp))
+                    if (showNumbers) {
+                        Text(n, style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.8f))
+                    } else {
+                        TextButton(onClick = { showNumbers = true }, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 0.dp)) {
+                            Text("See the numbers", color = Color.White.copy(alpha = 0.85f))
+                        }
                     }
                 }
+                Spacer(Modifier.height(24.dp))
             }
-            Spacer(Modifier.weight(1f))
             Text(
                 if (index < count - 1) "Tap for the next one" else "Tap to finish",
                 style = MaterialTheme.typography.labelMedium,
                 color = Color.White.copy(alpha = 0.7f),
                 textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             )
         }
     }
 }
+
+/** What a one-tap action does, for a pattern: null when there's nothing to tap. */
+internal data class GuardStep(val label: String, val run: () -> Unit, val pauses: List<String>)
 
 /** The one-tap action behind a slide, if it has one. */
 @Composable
@@ -244,63 +257,75 @@ private fun StoryAction(
     val p = slide.pattern ?: return
     val guards = LocalAppGuards.current
     val context = LocalContext.current
-    var done by remember(slide.id) { mutableStateOf(false) }
-    val listed = guards != null && p.packageName != null && p.packageName in guards.useLess
-    val label: String
-    val run: () -> Unit
-    when (p.action) {
-        PatternAction.PAUSE_APPS_AT_NIGHT -> {
-            if (guards == null || p.apps.isEmpty()) return
-            if (p.apps.all { it.first in guards.useLess && guards.pauseFrom[it.first] != null }) {
-                done = true
-            }
-            label = "Pause ${com.habitminer.analytics.PatternFinder.appNames(p.apps)} after 23:00 on weeknights"
-            run = { p.apps.forEach { (pkg, _) -> guards.onGuard(GuardRequest(pkg, true, p.nightFromMinute ?: 23 * 60, true, p.title)) } }
-        }
-        PatternAction.PAUSE_APP_AT_NIGHT -> {
-            val pkg = p.packageName ?: return
-            if (guards == null) return
-            if (listed) done = true
-            label = "Pause ${p.appName} after ${com.habitminer.analytics.Format.clockFromMinutes(p.nightFromMinute ?: 23 * 60)}"
-            run = { guards.onGuard(GuardRequest(pkg, true, p.nightFromMinute ?: 23 * 60, reason = p.title)) }
-        }
-        PatternAction.PAUSE_APP -> {
-            val pkg = p.packageName ?: return
-            if (guards == null) return
-            if (listed) done = true
-            label = "Pause before ${p.appName}"
-            run = { guards.onGuard(GuardRequest(pkg, true, reason = p.title)) }
-        }
-        PatternAction.APP_NOTIFICATIONS -> {
-            val pkg = p.packageName ?: return
-            label = "Open ${p.appName}'s notification settings"
-            run = {
-                runCatching {
-                    context.startActivity(
-                        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, pkg).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                    )
-                }
-            }
-        }
-        PatternAction.OPEN_SLEEP -> {
-            label = "See your nights"
-            run = onOpenSleep
-        }
-        PatternAction.NONE -> return
-    }
+    var tapped by remember(slide.id) { mutableStateOf(false) }
+    val step = guardStep(p, guards, context, onOpenSleep) ?: return
+    // Already set up before, or just now: say so, and say plainly if Android's switch is still off.
+    val alreadyOn = guards != null && step.pauses.isNotEmpty() && step.pauses.all { it in guards.useLess }
+    val done = tapped || alreadyOn
     Spacer(Modifier.height(12.dp))
-    if (done) {
-        Text("Done. It's on, and Goals will show whether it's working.", style = MaterialTheme.typography.titleSmall, color = Color.White)
-    } else {
-        Button(
-            onClick = {
-                run()
-                if (p.action != PatternAction.APP_NOTIFICATIONS && p.action != PatternAction.OPEN_SLEEP) done = true
-            },
-            colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color(0xFF151518)),
-        ) { Text(label) }
+    when {
+        done && step.pauses.isNotEmpty() && guards?.pauseWorks == true ->
+            Text("Done. It's on, and Goals will show whether it's working.", style = MaterialTheme.typography.titleSmall, color = Color.White)
+        done && step.pauses.isNotEmpty() ->
+            Text("Added. One step left: turn on the pause in Accessibility (HabitMiner opened it for you).", style = MaterialTheme.typography.titleSmall, color = Color.White)
+        else ->
+            Button(
+                onClick = {
+                    step.run()
+                    tapped = step.pauses.isNotEmpty()
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color(0xFF151518)),
+            ) { Text(step.label) }
     }
 }
+
+/** The label and action for a pattern's button, shared by stories and the Weekly Story. */
+internal fun guardStep(
+    p: com.habitminer.analytics.Pattern,
+    guards: com.habitminer.ui.design.AppGuards?,
+    context: Context,
+    onOpenSleep: () -> Unit,
+): GuardStep? =
+    when (p.action) {
+        PatternAction.PAUSE_APPS_AT_NIGHT ->
+            if (guards == null || p.apps.isEmpty()) {
+                null
+            } else {
+                GuardStep(
+                    "Pause ${com.habitminer.analytics.PatternFinder.appNames(p.apps)} after ${com.habitminer.analytics.Format.clockFromMinutes(p.nightFromMinute ?: 23 * 60)} on weeknights",
+                    { guards.onGuardAll(p.apps.map { (pkg, _) -> GuardRequest(pkg, true, p.nightFromMinute ?: 23 * 60, true, p.title) }) },
+                    p.apps.map { it.first },
+                )
+            }
+        PatternAction.PAUSE_APP_AT_NIGHT ->
+            p.packageName?.takeIf { guards != null }?.let { pkg ->
+                GuardStep(
+                    "Pause ${p.appName} after ${com.habitminer.analytics.Format.clockFromMinutes(p.nightFromMinute ?: 23 * 60)}",
+                    { guards!!.onGuard(GuardRequest(pkg, true, p.nightFromMinute ?: 23 * 60, reason = p.title)) },
+                    listOf(pkg),
+                )
+            }
+        PatternAction.PAUSE_APP ->
+            p.packageName?.takeIf { guards != null }?.let { pkg ->
+                GuardStep("Pause before ${p.appName}", { guards!!.onGuard(GuardRequest(pkg, true, reason = p.title)) }, listOf(pkg))
+            }
+        PatternAction.APP_NOTIFICATIONS ->
+            p.packageName?.let { pkg ->
+                GuardStep(
+                    "Open ${p.appName}'s notification settings",
+                    {
+                        runCatching {
+                            context.startActivity(
+                                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, pkg).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                            )
+                        }
+                    },
+                    emptyList(),
+                )
+            }
+        PatternAction.OPEN_SLEEP -> GuardStep("See your nights", onOpenSleep, emptyList())
+        PatternAction.NONE -> null
+    }
 
 /** Icons for the three kinds of bubbles. */
 object StoryIcons {

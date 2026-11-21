@@ -138,7 +138,7 @@ fun TrendsScreen(
                 when (tab) {
                     TrendsTab.OVERVIEW -> overview(state, actions, onOpenStory, onOpenSleep)
                     TrendsTab.APPS -> apps(state, onOpenApp)
-                    TrendsTab.ROUTINES -> routines(state)
+                    TrendsTab.ROUTINES -> routines(state, onOpenApp)
                     TrendsTab.CHANGES -> changes(state, actions)
                     TrendsTab.HISTORY -> history(state, actions)
                 }
@@ -189,6 +189,8 @@ private fun LazyListScope.overview(
             )
         }
     }
+    item(key = "numbers-header") { SectionHeader("Today in numbers") }
+    item(key = "numbers") { com.habitminer.ui.today.TodayNumbers(state) }
     insights.week?.let { week ->
         item(key = "week-hero") {
             Column(modifier = Modifier.padding(horizontal = ScreenPadding, vertical = 8.dp)) {
@@ -493,8 +495,17 @@ private fun AppsList(
 // Routines
 // ---------------------------------------------------------------------------------------
 
-private fun LazyListScope.routines(state: HabitUiState) {
+private fun LazyListScope.routines(
+    state: HabitUiState,
+    onOpenApp: (String) -> Unit,
+) {
     val insights = state.insights ?: return
+    if (state.predictions.isNotEmpty()) {
+        item(key = "likely-next") {
+            com.habitminer.ui.today.LikelyNext(state, onOpenApp)
+            Spacer(Modifier.height(8.dp))
+        }
+    }
     item(key = "predict-header") {
         SectionHeader(
             "How predictable is your next app?",
