@@ -38,6 +38,7 @@ internal object SequentialPatternMiner {
     const val DEFAULT_MIN_SUPPORT = 5
     const val DEFAULT_MAX_PATTERN_LENGTH = 4
     const val DEFAULT_MAX_GAP_MS = 15 * 60 * 1000L
+    const val DEFAULT_SAME_APP_MERGE_GAP_MS = 5 * 60 * 1000L
 
     private data class Projection(
         val dayIndex: Int,
@@ -56,13 +57,17 @@ internal object SequentialPatternMiner {
         require(maxGapMs >= 0) { "maxGapMs cannot be negative" }
         if (inputDays.size < minSupport) return emptyList()
 
-        // Merge adjacent sessions of the same app before mining. This avoids treating a
-        // collector/session boundary as a meaningful app transition.
-        val days = inputDays.map { day ->
+        // A day/bin must contribute support once, even if a caller supplies duplicate keys.
+        // Invalid intervals are discarded; overlapping different-app events are not treated as
+        // sequential transitions below.
+        val days = inputDays.groupBy { it.dayKey }.values.map { sameDay ->
             val collapsed = mutableListOf<SequenceEvent>()
-            for (event in day.events.sortedBy { it.startTime }) {
+            for (event in sameDay.flatMap { it.events }.filter { it.endTime > it.startTime }.sortedBy { it.startTime }) {
                 val previous = collapsed.lastOrNull()
-                if (previous?.packageName == event.packageName) {
+                val gapMs = previous?.let { event.startTime - it.endTime } ?: Long.MAX_VALUE
+                if (previous?.packageName == event.packageName &&
+                    gapMs <= DEFAULT_SAME_APP_MERGE_GAP_MS
+                ) {
                     collapsed[collapsed.lastIndex] = previous.copy(
                         endTime = maxOf(previous.endTime, event.endTime),
                     )
@@ -70,9 +75,9 @@ internal object SequentialPatternMiner {
                     collapsed += event
                 }
             }
-            collapsed
+            DailySequence(sameDay.first().dayKey, collapsed)
         }
-        if (days.count { it.isNotEmpty() } < minSupport) return emptyList()
+        if (days.count { it.events.isNotEmpty() } < minSupport) return emptyList()
 
         val names = inputDays.flatMap { it.events }.associate { it.packageName to it.appName }
         val discovered = mutableListOf<MinedSequencePattern>()
@@ -86,9 +91,13 @@ internal object SequentialPatternMiner {
             // Each token maps to all projected suffixes where that token can extend the prefix.
             val extensions = LinkedHashMap<String, MutableList<Projection>>()
             for (projection in projections) {
-                val events = days[projection.dayIndex]
+                val events = days[projection.dayIndex].events
                 for (index in projection.nextIndex until events.size) {
                     val event = events[index]
+                    if (projection.lastEnd != Long.MIN_VALUE && event.startTime < projection.lastEnd) {
+                        // Overlapping intervals cannot represent a sequential app transition.
+                        continue
+                    }
                     if (projection.lastEnd != Long.MIN_VALUE &&
                         event.startTime - projection.lastEnd > maxGapMs
                     ) {
