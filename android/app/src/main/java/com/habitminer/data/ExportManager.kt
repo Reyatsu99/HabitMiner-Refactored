@@ -64,6 +64,7 @@ class ExportManager
             withContext(Dispatchers.IO) {
                 exportMutex.withLock {
                     val exportDir = File(context.getExternalFilesDir(null) ?: context.filesDir, "export")
+                    val priv = prefs.getBoolean(PrefsKeys.EXPORT_PRIVATE, false)
                     var completedZip: File? = null
                     try {
                         if (!exportDir.exists() && !exportDir.mkdirs()) error("Could not create the export directory")
