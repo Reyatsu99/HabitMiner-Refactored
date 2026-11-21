@@ -103,57 +103,97 @@ def experiment2_next_behavior_prediction(usage_df: pd.DataFrame, user_id: str = 
     }
 
 def experiment3_deviation_detection(usage_df: pd.DataFrame, user_id: str = None) -> dict:
-    """Experiment 3: Deviation Detection"""
+    """Evaluate injected anomalies at the user/day/time-bin level, not per event row."""
     if user_id:
         usage_df = usage_df[usage_df["user_id"] == user_id]
-        
+
     train_df, test_df = split_data_chronologically(usage_df)
-    
-    # Build baselines
-    train_features = extract_time_bin_features(train_df)
-    baselines = build_baselines_for_all_users(train_features)
-    
-    # Inject deviations into test set for user_1
-    target_user = user_id if user_id else "user_1"
-    
-    # We will inject a fake GAMING session in the NIGHT
+    target_user = user_id or "user_1"
+    train_features = extract_time_bin_features(train_df, user_id=target_user)
+    baseline = build_baselines_for_all_users(train_features).get(target_user)
+    if baseline is None:
+        return {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "false_positive_rate": 0.0,
+            "true_positives": 0,
+            "false_positives": 0,
+            "false_negatives": 0,
+            "injected_bins": 0,
+        }
+
+    # Evening bins are present in the synthetic baseline for both weekday/weekend where
+    # enough training days exist. A controlled 45-minute GAMING session is added there.
     anomalous_test_df = inject_controlled_deviation(
-        test_df, target_user, from_time_slot="EVENING", to_time_slot="NIGHT", category="GAMING"
+        test_df,
+        target_user,
+        from_time_slot="EVENING",
+        to_time_slot="EVENING",
+        category="GAMING",
     )
-    
-    # Ensure there's a difference
-    clean_test_features = extract_time_bin_features(test_df)
-    anomalous_test_features = extract_time_bin_features(anomalous_test_df)
-    
-    baseline = baselines.get(target_user)
-    if not baseline:
-        return {"precision": 0, "recall": 0, "f1": 0, "false_positive_rate": 0}
-        
-    # Detect on clean (expect 0)
-    clean_devs = detect_deviations(clean_test_features, baseline)
-    fp = len(clean_devs)
-    
-    # Detect on anomalous (expect > 0)
-    anom_devs = detect_deviations(anomalous_test_features, baseline)
-    
-    # Let's say tp is deviations involving GAMING at NIGHT
-    tp = sum(1 for d in anom_devs if d.affected_category == "GAMING" and "NIGHT" in d.time_bin)
-    fn = 1 if tp == 0 else 0  # Assuming we injected 1 coherent anomaly
-    
-    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-    f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
-    
+    clean_features = extract_time_bin_features(test_df, user_id=target_user)
+    anomalous_features = extract_time_bin_features(anomalous_test_df, user_id=target_user)
+
+    def key(row):
+        return str(row["date"]), f"{row['day_type']}_{row['time_slot']}"
+
+    eligible_keys = {
+        key(row)
+        for _, row in clean_features.iterrows()
+        if baseline.get_bin(f"{row['day_type']}_{row['time_slot']}") is not None
+    }
+    injected_keys = {
+        key(row)
+        for _, row in anomalous_features.iterrows()
+        if bool(row.get("controlled_anomaly", False))
+        and baseline.get_bin(f"{row['day_type']}_{row['time_slot']}") is not None
+    }
+    if not injected_keys:
+        return {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "false_positive_rate": 0.0,
+            "true_positives": 0,
+            "false_positives": 0,
+            "false_negatives": 0,
+            "injected_bins": 0,
+        }
+
+    detected_events = detect_deviations(anomalous_features, baseline)
+    detected_keys = {
+        (event.date, event.time_bin)
+        for event in detected_events
+        if event.date is not None
+    }
+    negative_keys = eligible_keys - injected_keys
+    true_positives = len(detected_keys & injected_keys)
+    false_negatives = len(injected_keys - detected_keys)
+    false_positives = len(detected_keys & negative_keys)
+
+    precision = (
+        true_positives / (true_positives + false_positives)
+        if true_positives + false_positives
+        else 0.0
+    )
+    recall = true_positives / (true_positives + false_negatives) if injected_keys else 0.0
+    f1 = (
+        2 * precision * recall / (precision + recall)
+        if precision + recall
+        else 0.0
+    )
     return {
         "precision": precision,
         "recall": recall,
         "f1": f1,
-        "false_positive_rate": fp / len(clean_test_features) if not clean_test_features.empty else 0.0,
-        "true_positives": tp,
-        "false_positives": fp,
-        "false_negatives": fn
+        "false_positive_rate": false_positives / len(negative_keys) if negative_keys else 0.0,
+        "true_positives": true_positives,
+        "false_positives": false_positives,
+        "false_negatives": false_negatives,
+        "injected_bins": len(injected_keys),
+        "true_negatives": len(negative_keys) - false_positives,
     }
-
 def run_all_experiments(usage_df: pd.DataFrame) -> dict:
     """Run all 3 experiments"""
     return {
