@@ -50,6 +50,7 @@ class PersonalBaseline:
                         cat_totals[cat] = cat_totals.get(cat, 0) + dur
                 except (TypeError, ValueError):
                     # Ignore malformed category profiles, not unrelated programming errors.
+                    pass
                     
             profile = {k: v / total_dur_all for k, v in cat_totals.items()} if total_dur_all > 0 else {}
             
