@@ -75,7 +75,7 @@ class ExportManager
                             }
                         }
                         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-        
+
                         // 1. Export App Usage
                         val usageFile = File(exportDir, "app_usage_$timestamp.csv")
                         val usages = contextRepository.getAllUsage().firstOrNull() ?: emptyList()
@@ -90,7 +90,7 @@ class ExportManager
                                 writer.append("${escapeCsv(pkg(it.previousPackageName, priv))},${it.isHistorical}\n")
                             }
                         }
-        
+
                         // 2. Export Context Snapshots
                         val contextFile = File(exportDir, "context_snapshots_$timestamp.csv")
                         val contexts = contextRepository.getAllSnapshots().firstOrNull() ?: emptyList()
@@ -107,7 +107,7 @@ class ExportManager
                                 writer.append("${it.unlockCount},${it.notificationsLastHour},${escapeCsv(exportedPlaceId(it.wifiPlace, priv))},${it.sensingMs},${it.recentSteps},${it.batteryTempC ?: ""},${it.powerSave ?: ""},${it.thermalStatus ?: ""}\n")
                             }
                         }
-        
+
                         // 3. Export Habits
                         val habitsFile = File(exportDir, "habits_$timestamp.csv")
                         val habits = habitRepository.getAllHabits().firstOrNull() ?: emptyList()
@@ -120,7 +120,7 @@ class ExportManager
                                 writer.append("${it.occurrenceCount},${it.timeSlot},${it.dayType},${it.discoveredAt},${it.lastSeenAt}\n")
                             }
                         }
-        
+
                         // 4. Export Baselines
                         val baselinesFile = File(exportDir, "baselines_$timestamp.csv")
                         val baselines = habitRepository.getAllBaselines().firstOrNull() ?: emptyList()
@@ -140,7 +140,7 @@ class ExportManager
                                 )
                             }
                         }
-        
+
                         // 5. Export Deviations
                         val deviationsFile = File(exportDir, "deviations_$timestamp.csv")
                         val deviations = habitRepository.getAllDeviations().firstOrNull() ?: emptyList()
@@ -151,7 +151,7 @@ class ExportManager
                                 writer.append("${escapeCsv(if (priv) "" else it.description)},${it.zScore},${it.normalizedScore},${escapeCsv(it.affectedCategory)}\n")
                             }
                         }
-        
+
                         // 6. Labels: check-in answers and deviation feedback (ground truth for evaluation)
                         val labelsFile = File(exportDir, "labels_$timestamp.csv")
                         val labels = feedbackRepository.getAllLabels().firstOrNull() ?: emptyList()
@@ -162,7 +162,7 @@ class ExportManager
                                 writer.append("${escapeCsv(if (priv) "" else it.refKey ?: "")},${it.promptedAt ?: ""},${escapeCsv(if (priv) "" else it.contextJson ?: "")}\n")
                             }
                         }
-        
+
                         // 7. Wi-Fi places (hashed IDs and the names given to them)
                         val placesFile = File(exportDir, "places_$timestamp.csv")
                         val places = feedbackRepository.getPlaces().firstOrNull() ?: emptyList()
@@ -172,7 +172,7 @@ class ExportManager
                                 writer.append("${escapeCsv(exportedPlaceId(it.placeHash, priv))},${escapeCsv(if (priv) "" else it.label ?: "")},${it.firstSeen},${it.lastSeen}\n")
                             }
                         }
-        
+
                         // 8. Device events: unlocks and notifications this app saw ("app"), and the
                         //    lock-screen, screen and power events copied from Android's log ("system").
                         val eventsFile = File(exportDir, "device_events_$timestamp.csv")
@@ -184,7 +184,7 @@ class ExportManager
                                 writer.append("${escapeCsv(it.eventType)},${escapeCsv(pkg(it.packageName, priv))},${it.timestamp},$source,${escapeCsv(if (priv) "" else it.detail ?: "")}\n")
                             }
                         }
-        
+
                         // 9. Sleep per day: the night that ended that morning + confirmed naps.
                         val sleepFile = File(exportDir, "sleep_days_$timestamp.csv")
                         sleepFile.writer(Charsets.UTF_8).use { writer ->
@@ -200,8 +200,8 @@ class ExportManager
                                 writer.append("${d.naps.size},${d.napMs / 60_000},${d.totalMs / 60_000},${n?.confidence?.name ?: ""}\n")
                             }
                         }
-        
-        
+
+
                         // 10. What the app picked as the day's insight, and how you answered.
                         val insightFile = File(exportDir, "insight_log_$timestamp.csv")
                         insightFile.writer(Charsets.UTF_8).use { writer ->
@@ -213,7 +213,7 @@ class ExportManager
                                 writer.append(if (priv) "\n" else ",${escapeCsv(it.title)},${escapeCsv(it.body)},${escapeCsv(it.why)}\n")
                             }
                         }
-        
+
                         // 11. HabitMiner's own resource use: running totals from Android's per-app health stats.
                         val selfFile = File(exportDir, "self_health_$timestamp.csv")
                         selfFile.writer(Charsets.UTF_8).use { writer ->
@@ -223,11 +223,11 @@ class ExportManager
                                 writer.append("${it.wifiMams},${it.bluetoothMams},${it.batteryLevel},${it.chargeCounterUah ?: ""}\n")
                             }
                         }
-        
+
                         // 12. README and schema, so the files can be read without this app.
                         val readmeFile = File(exportDir, "README.txt").also { it.writeText(readme(priv)) }
                         val schemaFile = File(exportDir, "schema.json").also { it.writeText(schemaJson(priv)) }
-        
+
                         // 13. Zip everything
                         val zipFile = File(exportDir, "habitminer_export_$timestamp.zip")
                         java.util.zip.ZipOutputStream(java.io.FileOutputStream(zipFile)).use { zos ->
@@ -240,7 +240,7 @@ class ExportManager
                                 }
                             }
                         }
-        
+
                         completedZip = zipFile
                         zipFile.absolutePath
                     } catch (e: Exception) {
