@@ -245,4 +245,3 @@ class ImportManager
             const val MAX_TOTAL_UNCOMPRESSED_BYTES = 128L * 1024 * 1024
         }
     }
-}
