@@ -815,9 +815,8 @@ fun PlacesSection(
         icon = Icons.Rounded.Place,
         iconColor = com.habitminer.ui.theme.LocalDataColors.current.freeHue.start,
         info =
-            "Groups your phone use by place (home, campus) using the Wi-Fi network you're connected to. Only a scrambled ID is stored, " +
-                "never the network's name or your location. Android asks for location access to share the network ID, and location " +
-                "services need to stay on.",
+            "Groups your phone use by the connected Wi-Fi network. A salted hash is stored with timestamps, so repeated places can be recognised; " +
+                "the network name and GPS coordinates are not collected. Android location permission and location services are required to read the network ID.",
     )
     val names = state.insights?.placeNames.orEmpty()
     RowGroup {
