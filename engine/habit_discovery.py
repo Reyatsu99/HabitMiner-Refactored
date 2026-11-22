@@ -1,6 +1,5 @@
 from dataclasses import dataclass
-from typing import List, Dict, Tuple
-import pandas as pd
+from typing import List, Dict
 
 @dataclass
 class DiscoveredHabit:

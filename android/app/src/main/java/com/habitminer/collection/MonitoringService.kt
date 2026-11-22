@@ -22,6 +22,7 @@ import com.habitminer.proactive.ProactiveEngine
 import com.habitminer.repository.ContextRepository
 import com.habitminer.ui.MainActivity
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -186,10 +187,23 @@ class MonitoringService : Service() {
             serviceScope.launch {
                 // After an unlock, wait until the phone is actually in use before sampling.
                 if (trigger == ReadingRunner.Trigger.UNLOCK) delay(3_000L)
-                runCatching { readingRunner.read(trigger) }
-                    .onFailure { android.util.Log.w("HabitMiner", "Event reading failed", it) }
+                try {
+                    readingRunner.read(trigger)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    android.util.Log.w("HabitMiner", "Event reading failed", e)
+                }
                 // Right after an unlock is a good moment for a question or a nudge.
-                if (trigger == ReadingRunner.Trigger.UNLOCK) runCatching { proactiveEngine.tick(afterUnlock = true) }
+                if (trigger == ReadingRunner.Trigger.UNLOCK) {
+                    try {
+                        proactiveEngine.tick(afterUnlock = true)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        android.util.Log.w("HabitMiner", "Post-unlock prompt check failed", e)
+                    }
+                }
                 refreshNotification()
             }
     }
@@ -225,12 +239,16 @@ class MonitoringService : Service() {
     /** Re-posts the notification only when its text changed (each post wakes the system UI). */
     private fun refreshNotification(force: Boolean = false) {
         serviceScope.launch {
-            runCatching {
+            try {
                 val zone = ZoneId.systemDefault()
                 val startOfDay = TimeUtil.startOfDay(TimeUtil.dateOf(System.currentTimeMillis(), zone), zone)
                 val today = contextRepository.getUsageSince(startOfDay).filterNot { appIdentityResolver.isLauncher(it.packageName) }
                 todayScreenTimeMs = today.sumOf { it.durationMs }
                 lastUsedApp = today.maxByOrNull { it.startTime }?.let { appIdentityResolver.getAppName(it.packageName) } ?: ""
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.w("HabitMiner", "Could not refresh notification context", e)
             }
             val content = notificationContent()
             if (!force && content == shownContent) return@launch

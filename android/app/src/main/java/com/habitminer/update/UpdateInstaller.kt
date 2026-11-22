@@ -9,6 +9,7 @@ import androidx.core.content.FileProvider
 import com.habitminer.analytics.ReleaseInfo
 import com.habitminer.analytics.UpdateLogic
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -99,6 +100,10 @@ class UpdateInstaller
                     if (sha != release.sha256) return@withContext fail("The file doesn't match its checksum, so it was discarded.")
                     verifyPackage(file, release)?.let { return@withContext fail(it) }
                     _state.value = InstallState.Ready(file)
+                } catch (e: CancellationException) {
+                    file.delete()
+                    _state.value = InstallState.Idle
+                    throw e
                 } catch (e: Exception) {
                     fail("The download couldn't finish. Check your connection and try again.")
                 } finally {

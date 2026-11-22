@@ -1,0 +1,50 @@
+name: Python evaluation engine
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'engine/**'
+      - '.github/workflows/python-engine.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'engine/**'
+      - '.github/workflows/python-engine.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test Python evaluation engine
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: engine
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: engine/requirements.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Compile Python sources
+        run: python -m compileall -q .
+
+      - name: Run tests
+        run: python -m pytest -q
+      - name: Smoke-test evaluation report
+        run: python main.py --dataset synthetic --mode evaluate --num-days 28 --num-users 3 --seed 42 --output /tmp/habitminer-report.html
+      - name: Verify report was generated
+        run: test -s /tmp/habitminer-report.html

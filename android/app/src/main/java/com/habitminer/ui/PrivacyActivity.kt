@@ -82,8 +82,9 @@ fun PrivacyScreen(
         }
         item(key = "summary") {
             Note(
-                "Everything HabitMiner records stays on this phone. There's no account, no server and no analytics. " +
-                    "Data leaves the phone only when you export it yourself.",
+                "Your usage history and sensor readings stay on this phone. There's no account or third-party analytics. " +
+                    "HabitMiner contacts GitHub only to check for app updates; it never uploads your usage records. " +
+                    "Data leaves the phone only when you export or share it.",
             )
         }
         item(key = "records") {
@@ -100,7 +101,12 @@ fun PrivacyScreen(
         item(key = "optional") {
             SectionHeader("Only if you turn it on")
             RowGroup {
-                row { ListRow("Places", supporting = "A scrambled ID of the Wi-Fi network, never its name or your location") }
+                row {
+                    ListRow(
+                        "Places",
+                        supporting = "A salted hash of the connected Wi-Fi network. Android location permission is needed to read it; no GPS coordinates are collected",
+                    )
+                }
                 row { ListRow("Health Connect", supporting = "Sleep sessions only, read-only, to check sleep estimates. Nothing is written back") }
                 row { ListRow("Calendar", supporting = "Busy or free only, never titles, places or people. Read when needed, not stored") }
             }
@@ -109,8 +115,13 @@ fun PrivacyScreen(
             SectionHeader("What it never does")
             RowGroup {
                 row { ListRow("Read messages or screens", supporting = "No notification text, no screen content, no keystrokes") }
-                row { ListRow("Track location", supporting = "No GPS. Places use a scrambled Wi-Fi ID, and only when you turn them on") }
-                row { ListRow("Send data anywhere", supporting = "The only network use is checking GitHub for app updates") }
+                row {
+                    ListRow(
+                        "Track location",
+                        supporting = "No GPS coordinates or continuous location updates. If you enable Places, HabitMiner can infer a saved place from the connected Wi-Fi network; it stores a salted network hash and timestamps",
+                    )
+                }
+                row { ListRow("Upload usage data", supporting = "No usage or sensor records are uploaded. The only network request checks GitHub for app updates") }
             }
         }
         item(key = "control") {

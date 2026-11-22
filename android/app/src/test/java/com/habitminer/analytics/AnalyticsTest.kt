@@ -1206,9 +1206,22 @@ class UpdateLogicTest {
     }
 
     @Test
+    fun `development version is below the matching release and above legacy releases`() {
+        assertEquals(10200, UpdateLogic.versionCodeOf("v1.2.0"))
+        assertEquals(20500, UpdateLogic.versionCodeOf("v2.5.0"))
+        assertEquals(20600, UpdateLogic.versionCodeOf("v2.6.0"))
+        val releases = listOf(rel("v1.2.0"), rel("v2.5.0"), rel("v2.6.0"))
+        assertEquals("v2.6.0", UpdateLogic.newest(releases, 20599, null)?.tag)
+        assertNull(UpdateLogic.newest(releases.take(2), 20599, null))
+    }
+
+    @Test
     fun `only this repository's GitHub downloads over https are trusted`() {
         assertTrue(UpdateLogic.trustedDownload("https://github.com/a/b/releases/download/v1.0.0/x.apk", "a/b"))
-        assertTrue(UpdateLogic.trustedDownload("https://objects.githubusercontent.com/abc", "a/b"))
+        assertTrue(UpdateLogic.trustedDownload("https://github.com/Reyatsu99/HabitMiner-Refactored/releases/download/v2.6.0/app.apk", "Reyatsu99/HabitMiner-Refactored"))
+        assertTrue(UpdateLogic.trustedDownload("https://objects.githubusercontent.com/github-production-release-asset/123/asset.apk", "a/b"))
+        assertTrue(UpdateLogic.trustedDownload("https://release-assets.githubusercontent.com/github-production-release-asset/123/asset.apk", "a/b"))
+        assertFalse(UpdateLogic.trustedDownload("https://objects.githubusercontent.com/abc", "a/b"))
         assertFalse(UpdateLogic.trustedDownload("http://github.com/a/b/releases/download/v1.0.0/x.apk", "a/b"))
         assertFalse(UpdateLogic.trustedDownload("https://github.com/evil/b/releases/download/v1.0.0/x.apk", "a/b"))
         assertFalse(UpdateLogic.trustedDownload("https://github.com.evil.com/a/b/releases/download/v1/x.apk", "a/b"))
@@ -1232,7 +1245,6 @@ class UpdateLogicTest {
         assertEquals("v2.2.0", UpdateLogic.newest(rs, 20100, null)?.tag)
         assertEquals("v2.1.0", UpdateLogic.newest(rs.take(2), 20000, "v2.2.0")?.tag)
         assertNull(UpdateLogic.newest(rs, 20200, null))
-        assertNull(UpdateLogic.newest(rs, 0, null)?.takeIf { false })
     }
 }
 
@@ -1854,4 +1866,3 @@ class PatternsTest {
         assertTrue(est.lastAppLeisure)
     }
 }
-

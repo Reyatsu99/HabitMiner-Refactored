@@ -182,11 +182,14 @@ object ContextInsights {
         // After midnight.
         if (overall.lateNight >= 30 * TimeUtil.MINUTE) {
             val topLate = perApp.maxByOrNull { it.value.lateNight }?.key
+            val detail =
+                topLate?.let { "Mostly $it, between 00:00 and 05:00 $periodLabel." }
+                    ?: "Between 00:00 and 05:00 $periodLabel."
             out.add(
                 ContextInsight(
                     InsightKind.LATE_NIGHT,
                     "${Format.duration(overall.lateNight)} of screen time after midnight",
-                    if (topLate != null) "Mostly $topLate, between 00:00 and 05:00 $periodLabel." else "Between 00:00 and 05:00 $periodLabel.",
+                    detail,
                     overall.lateNight.toDouble() / TimeUtil.HOUR,
                 ),
             )

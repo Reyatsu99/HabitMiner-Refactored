@@ -5,7 +5,7 @@ import numpy as np
 from scipy.special import rel_entr
 import json
 import math
-from baseline_model import PersonalBaseline, BaselineBin
+from baseline_model import PersonalBaseline
 
 @dataclass
 class DeviationEvent:
@@ -15,23 +15,29 @@ class DeviationEvent:
     z_score: float
     normalized_score: float
     affected_category: str
+    date: str | None = None
 
 def compute_kl_divergence(p: dict, q: dict) -> float:
-    """
-    KL divergence between two category distributions.
-    Handles zero values with small epsilon.
-    """
-    eps = 1e-5
-    all_keys = set(p.keys()).union(q.keys())
-    
-    p_arr = np.array([p.get(k, 0) + eps for k in all_keys])
-    q_arr = np.array([q.get(k, 0) + eps for k in all_keys])
-    
-    p_arr = p_arr / p_arr.sum()
-    q_arr = q_arr / q_arr.sum()
-    
-    return float(np.sum(rel_entr(p_arr, q_arr)))
+    """KL divergence for observed category profiles; empty profiles carry no evidence."""
+    if not p or not q:
+        return 0.0
 
+    keys = sorted(set(p) | set(q))
+    p_arr = np.array([float(p.get(k, 0.0)) for k in keys], dtype=float)
+    q_arr = np.array([float(q.get(k, 0.0)) for k in keys], dtype=float)
+    if not np.isfinite(p_arr).all() or not np.isfinite(q_arr).all():
+        raise ValueError("category profiles must contain finite values")
+    if (p_arr < 0).any() or (q_arr < 0).any():
+        raise ValueError("category profiles cannot contain negative values")
+    if p_arr.sum() <= 0 or q_arr.sum() <= 0:
+        return 0.0
+
+    eps = 1e-5
+    p_arr += eps
+    q_arr += eps
+    p_arr /= p_arr.sum()
+    q_arr /= q_arr.sum()
+    return float(np.sum(rel_entr(p_arr, q_arr)))
 def normalized_score(z: float) -> float:
     """sigmoid(|z|) clamped to [0, 1]"""
     return min(1.0, 1.0 / (1.0 + math.exp(-abs(z))))
@@ -68,7 +74,8 @@ def detect_deviations(
                 description=f"Unusually high screen time ({row['total_duration_seconds']/60:.0f} mins)",
                 z_score=z_dur,
                 normalized_score=normalized_score(z_dur),
-                affected_category=row["dominant_category"]
+                affected_category=row["dominant_category"],
+                date=str(row["date"]),
             ))
             
         # Z-score for session_count
@@ -84,7 +91,8 @@ def detect_deviations(
                 description=f"High frequency of app opens ({row['session_count']} sessions)",
                 z_score=z_sess,
                 normalized_score=normalized_score(z_sess),
-                affected_category=row["dominant_category"]
+                affected_category=row["dominant_category"],
+                date=str(row["date"]),
             ))
             
         # Category distribution
@@ -94,7 +102,8 @@ def detect_deviations(
             total_dur = sum(today_profile.values())
             if total_dur > 0:
                 today_profile = {k: v/total_dur for k, v in today_profile.items()}
-        except Exception:
+        except (TypeError, ValueError):
+            # Ignore malformed or empty JSON profile data; surface unrelated failures.
             pass
             
         # KL-divergence
@@ -107,7 +116,8 @@ def detect_deviations(
                     description="Significant shift in app usage distribution",
                     z_score=kl_div,  # mapping KL to z roughly
                     normalized_score=min(1.0, kl_div / 3.0),
-                    affected_category=row["dominant_category"]
+                    affected_category=row["dominant_category"],
+                    date=str(row["date"]),
                 ))
                 
         # New behavior check
@@ -122,7 +132,8 @@ def detect_deviations(
                 description=f"New significant usage of {c}",
                 z_score=2.0,
                 normalized_score=0.88,
-                affected_category=c
+                affected_category=c,
+                date=str(row["date"]),
             ))
             
         # Missing routine
@@ -136,7 +147,8 @@ def detect_deviations(
                     description=f"Missing expected {c} routine",
                     z_score=-2.0,
                     normalized_score=0.88,
-                    affected_category=c
+                    affected_category=c,
+                    date=str(row["date"]),
                 ))
                 
     deviations.sort(key=lambda x: x.normalized_score, reverse=True)
@@ -147,24 +159,68 @@ def inject_controlled_deviation(
     user_id: str,
     from_time_slot: str,
     to_time_slot: str,
-    category: str = "GAMING"
+    category: str = "GAMING",
 ) -> pd.DataFrame:
     """
-    For evaluation (Experiment 3):
-    Move sessions of given category from from_time_slot to to_time_slot.
+    Add a clearly marked controlled category anomaly to each eligible test day.
+
+    Existing matching sessions are moved by five hours when changing time slots. If none
+    exist (which is common in the synthetic generator), one deterministic 45-minute session
+    is inserted at the target time. The marker is carried through feature extraction and
+    is used only for evaluation labels; it is never a model input.
     """
     df = usage_df.copy()
-    
-    # Find sessions to move
-    mask = (df["user_id"] == user_id) & (df["app_category"] == category) & (df["time_slot"] == from_time_slot)
-    
-    # Calculate time shift
-    # from_time_slot e.g. EVENING (17-21) to NIGHT (22-5)
-    # Just add 5 hours for simplicity
-    df.loc[mask, "start_time"] = df.loc[mask, "start_time"] + pd.Timedelta(hours=5)
-    df.loc[mask, "end_time"] = df.loc[mask, "end_time"] + pd.Timedelta(hours=5)
-    
-    # Update time_slot
-    df.loc[mask, "time_slot"] = to_time_slot
-    
-    return df
+    if df.empty:
+        df["controlled_anomaly"] = pd.Series(dtype=bool)
+        return df
+
+    df["start_time"] = pd.to_datetime(df["start_time"], errors="coerce")
+    df["end_time"] = pd.to_datetime(df["end_time"], errors="coerce")
+    if "controlled_anomaly" not in df.columns:
+        df["controlled_anomaly"] = False
+    else:
+        df["controlled_anomaly"] = df["controlled_anomaly"].fillna(False).astype(bool)
+
+    mask = (
+        (df["user_id"] == user_id)
+        & (df["app_category"] == category)
+        & (df["time_slot"] == from_time_slot)
+    )
+    if mask.any() and from_time_slot != to_time_slot:
+        df.loc[mask, "start_time"] += pd.Timedelta(hours=5)
+        df.loc[mask, "end_time"] += pd.Timedelta(hours=5)
+        df.loc[mask, "time_slot"] = to_time_slot
+        df.loc[mask, "day_type"] = df.loc[mask, "start_time"].dt.weekday.apply(
+            lambda weekday: "WEEKEND" if weekday >= 5 else "WEEKDAY"
+        )
+        df.loc[mask, "controlled_anomaly"] = True
+        return df
+
+    user_days = sorted(
+        df.loc[df["user_id"] == user_id, "start_time"].dropna().dt.date.unique()
+    )
+    if not user_days:
+        return df
+    target_hours = {"MORNING": 9, "AFTERNOON": 14, "EVENING": 20, "NIGHT": 23}
+    hour = target_hours.get(to_time_slot)
+    if hour is None:
+        raise ValueError(f"Unsupported time slot: {to_time_slot}")
+
+    injected = []
+    for day in user_days:
+        start = pd.Timestamp(day).replace(hour=hour, minute=0, second=0, microsecond=0)
+        end = start + pd.Timedelta(minutes=45)
+        injected.append(
+            {
+                "user_id": user_id,
+                "package_name": f"synthetic.controlled.{category.lower()}",
+                "app_category": category,
+                "start_time": start,
+                "end_time": end,
+                "duration_seconds": 45 * 60,
+                "time_slot": to_time_slot,
+                "day_type": "WEEKEND" if start.weekday() >= 5 else "WEEKDAY",
+                "controlled_anomaly": True,
+            }
+        )
+    return pd.concat([df, pd.DataFrame(injected)], ignore_index=True)

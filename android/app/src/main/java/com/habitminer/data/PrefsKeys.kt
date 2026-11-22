@@ -96,6 +96,7 @@ object PrefsKeys {
     const val UPDATE_NOT_BEFORE = "update_not_before"
     const val UPDATE_FAILURES = "update_failures"
     const val UPDATE_ETAG = "update_etag"
+    const val UPDATE_REPO = "update_repo"
     const val UPDATE_CACHED = "update_cached"
     const val UPDATE_SKIPPED = "update_skipped"
     const val UPDATE_NOTIFIED = "update_notified"

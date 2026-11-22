@@ -38,7 +38,8 @@ object UpdateLogic {
         if (u.scheme != "https") return false
         val host = u.host?.lowercase() ?: return false
         if (host == "github.com") return u.path.lowercase().startsWith("/${repo.lowercase()}/releases/download/")
-        return host == "objects.githubusercontent.com" || host == "release-assets.githubusercontent.com"
+        val githubAssetHost = host == "objects.githubusercontent.com" || host == "release-assets.githubusercontent.com"
+        return githubAssetHost && u.path.lowercase().startsWith("/github-production-release-asset/")
     }
 
     fun sha256Hex(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }

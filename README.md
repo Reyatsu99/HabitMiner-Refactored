@@ -9,7 +9,7 @@
 
 HabitMiner Extended is the next version of [HabitMiner](docs/archive/README_OLD.md). It installs as its own app (**HM Extended**, `com.habitminer.extended`) next to the original, can bring the original's history across, and adds a redesigned interface, better sleep and nap tracking, goals, a long list of accuracy fixes found by using it every day, shorter daily loops (2.1), and (in 2.2) **patterns**: what pulls you into your phone, what it costs you, and whether your changes are working. Version 2.6 adds plain-language stories, notification-noise insights and more actionable sleep patterns.
 
-Everything stays on the phone. There is no account and no server; data leaves the device only when you export it.
+Usage, sensor and personal data stay on the phone; nothing is uploaded to a telemetry or analytics server. The app contacts GitHub only to check release metadata. Your recorded data leaves the device only when you export it.
 
 ---
 
@@ -206,7 +206,7 @@ Today opens with stories, like Instagram's: **Today** (one or two insights), **L
   </tr>
 </table>
 
-<sub>Rendered by the app's screenshot tests (Robolectric) with two weeks of sample data, so the numbers are illustrative. Pushes to Android source branches regenerate these screenshots. Non-PR builds publish them to the matching <code>ci-out-&lt;branch-name&gt;</code> branch; pull-request builds upload Actions artifacts only. Locally: <code>./gradlew testDebugUnitTest --tests "*ScreenshotTest*"</code>, images in <code>android/app/build/screenshots</code>.</sub>
+<sub>Rendered by the app's screenshot tests (Robolectric) with two weeks of sample data, so the numbers are illustrative. Builds on `main` regenerate and publish these screenshots to `ci-out-main`; pull-request builds upload Actions artifacts only. Locally: <code>./gradlew testDebugUnitTest --tests "*ScreenshotTest*"</code>, images in <code>android/app/build/screenshots</code>.</sub>
 
 ---
 
@@ -326,9 +326,15 @@ android/app/src/main/java/com/habitminer/
 └── widget/       home-screen widget
 ```
 
-More background on the original design is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/METHODOLOGY.md](docs/METHODOLOGY.md). See the [repository structure and branch guide](docs/REPOSITORY_GUIDE.md) for the code map and branch responsibilities.
+More background on the original design is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/METHODOLOGY.md](docs/METHODOLOGY.md). See the [repository structure and branch guide](docs/REPOSITORY_GUIDE.md) for the code map and branch responsibilities, and the [code review notes](docs/CODE_REVIEW.md) for recent fixes and remaining considerations.
 
 ---
+
+## 🧪 Evaluation engine
+
+The separate Python prototype under `engine/` evaluates sequential-pattern mining, time-conditioned Markov prediction and deviation heuristics on **reproducible synthetic usage data**. Its current CLI supports `--dataset synthetic` with a configurable `--seed`; StudentLife and UCI HAR adapters/activity-recognition evaluation are explicitly marked as not implemented rather than silently substituting synthetic data. See [engine/README.md](engine/README.md).
+
+CI runs Android build/unit/screenshot checks separately from the Python evaluation-engine tests. Pull-request build/test jobs are read-only; only a successful push to `main` publishes APK/screenshot outputs to `ci-out-main`.
 
 ## 🚀 Getting started
 
@@ -354,7 +360,7 @@ Requires JDK 21 and a physical Android 8.0+ device; emulators don't produce real
 - **Notification access**: notification counts per app, never their text.
 - **Physical activity**: steps and activity recognition, to tell walking from sitting.
 - **Battery optimisation off**: so Android doesn't stop collection in the background.
-- **Optional**: Health Connect (sleep), calendar (busy times), location (only to see the Wi-Fi network for places; no location is recorded).
+- **Optional**: Health Connect (sleep), calendar (busy times), and Wi-Fi Places. Places requires Android location permission to read the connected network ID and stores a salted hash with timestamps; it does not collect GPS coordinates.
 
 ---
 

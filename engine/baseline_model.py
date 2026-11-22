@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 from typing import Dict, Optional
 import pandas as pd
-import numpy as np
 import json
 
 @dataclass
@@ -21,8 +20,9 @@ class PersonalBaseline:
     
     def build(self, feature_df: pd.DataFrame) -> None:
         """
-        Build baseline from feature_df.
+        Build a fresh baseline from feature_df, replacing any previous bins.
         """
+        self.bins.clear()
         if feature_df.empty:
             return
             
@@ -49,7 +49,8 @@ class PersonalBaseline:
                     cat_dict = json.loads(cat_dict_str)
                     for cat, dur in cat_dict.items():
                         cat_totals[cat] = cat_totals.get(cat, 0) + dur
-                except Exception:
+                except (TypeError, ValueError):
+                    # Ignore malformed category profiles, not unrelated programming errors.
                     pass
                     
             profile = {k: v / total_dur_all for k, v in cat_totals.items()} if total_dur_all > 0 else {}
@@ -66,8 +67,10 @@ class PersonalBaseline:
     
     def update(self, new_feature_df: pd.DataFrame, alpha: float = 0.2) -> None:
         """
-        Exponential moving average update
+        Exponential moving average update.
         """
+        if not 0.0 <= alpha <= 1.0:
+            raise ValueError("alpha must be between 0 and 1")
         df = new_feature_df[new_feature_df["user_id"] == self.user_id]
         if df.empty:
             return
@@ -87,7 +90,7 @@ class PersonalBaseline:
                     cat_dict = json.loads(cat_dict_str)
                     for cat, dur in cat_dict.items():
                         cat_totals[cat] = cat_totals.get(cat, 0) + dur
-                except Exception:
+                except (TypeError, ValueError):
                     pass
             new_profile = {k: v / total_dur_all for k, v in cat_totals.items()} if total_dur_all > 0 else {}
             
