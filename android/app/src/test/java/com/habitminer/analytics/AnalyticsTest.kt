@@ -1207,9 +1207,10 @@ class UpdateLogicTest {
 
     @Test
     fun `development version is below the matching release and above legacy releases`() {
+        assertEquals(10200, UpdateLogic.versionCodeOf("v1.2.0"))
+        assertEquals(20500, UpdateLogic.versionCodeOf("v2.5.0"))
         assertEquals(20600, UpdateLogic.versionCodeOf("v2.6.0"))
         val releases = listOf(rel("v1.2.0"), rel("v2.5.0"), rel("v2.6.0"))
-        assertNull(UpdateLogic.newest(releases, 20599, null)?.takeIf { it.tag != "v2.6.0" })
         assertEquals("v2.6.0", UpdateLogic.newest(releases, 20599, null)?.tag)
         assertNull(UpdateLogic.newest(releases.take(2), 20599, null))
     }
