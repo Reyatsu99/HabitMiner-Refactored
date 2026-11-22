@@ -2,7 +2,7 @@ import pandas as pd
 import pytest
 
 from baseline_model import PersonalBaseline
-from deviation_detector import inject_controlled_deviation
+from deviation_detector import compute_kl_divergence, inject_controlled_deviation
 from evaluate import experiment3_deviation_detection, split_data_chronologically
 from feature_extraction import extract_time_bin_features
 from habit_discovery import mine_frequent_sequences
@@ -83,6 +83,22 @@ def test_baseline_build(synthetic_data):
     baseline.build(features)
     assert isinstance(baseline.bins, dict)
 
+
+def test_baseline_build_replaces_stale_bins_and_validates_alpha(synthetic_data):
+    features = extract_time_bin_features(synthetic_data)
+    baseline = PersonalBaseline(user_id="user_1")
+    baseline.build(features)
+    assert baseline.bins
+    baseline.build(features.iloc[0:0])
+    assert baseline.bins == {}
+
+    with pytest.raises(ValueError, match="alpha must be between 0 and 1"):
+        baseline.update(features, alpha=1.5)
+
+
+def test_kl_divergence_handles_empty_profiles():
+    assert compute_kl_divergence({}, {}) == 0.0
+    assert compute_kl_divergence({"SOCIAL": 1.0}, {"SOCIAL": 1.0}) < 1e-9
 
 def test_markov_model():
     seqs = {
