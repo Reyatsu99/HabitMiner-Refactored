@@ -330,6 +330,12 @@ More background on the original design is in [docs/ARCHITECTURE.md](docs/ARCHITE
 
 ---
 
+## 🧪 Evaluation engine
+
+The separate Python prototype under `engine/` evaluates sequential-pattern mining, time-conditioned Markov prediction and deviation heuristics on **reproducible synthetic usage data**. Its current CLI supports `--dataset synthetic` with a configurable `--seed`; StudentLife and UCI HAR adapters/activity-recognition evaluation are explicitly marked as not implemented rather than silently substituting synthetic data. See [engine/README.md](engine/README.md).
+
+CI runs Android build/unit/screenshot and formatting checks separately from the Python evaluation-engine tests. Pull-request build/test jobs are read-only; only a successful push to `main` publishes APK/screenshot outputs to `ci-out-main`.
+
 ## 🚀 Getting started
 
 ### Install
