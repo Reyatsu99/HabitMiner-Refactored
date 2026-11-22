@@ -210,7 +210,7 @@ class ExportManager
                             writer.append(if (priv) "\n" else ",title,body,why\n")
                             insightRepository.all().forEach {
                                 writer.append("${it.timestamp},${it.date},${escapeCsv(it.family)},${escapeCsv(if (priv) "" else it.key)},${it.effect},${it.score},")
-                                writer.append("${it.probability},${it.notifiedAt ?: ""},${it.openedAt ?: ""},${escapeCsv(it.feedback ?: "")}")
+                                writer.append("${it.probability},${it.notifiedAt ?: ""},${it.openedAt ?: ""},${escapeCsv(if (priv) "" else it.feedback ?: "")}")
                                 writer.append(if (priv) "\n" else ",${escapeCsv(it.title)},${escapeCsv(it.body)},${escapeCsv(it.why)}\n")
                             }
                         }
