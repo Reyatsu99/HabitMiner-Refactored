@@ -69,12 +69,12 @@ class ExportManager
                     try {
                         if (!exportDir.exists() && !exportDir.mkdirs()) error("Could not create the export directory")
                         // A previous export is no longer needed in this staging directory.
-                        exportDir.listFiles()?.forEach { file ->
+                        exportDir.listFiles()?.filter { !it.name.endsWith(".zip", ignoreCase = true) }?.forEach { file ->
                             if (!file.delete() && file.exists()) {
                                 Log.w(TAG, "Could not remove previous export staging file: ${file.name}")
                             }
                         }
-                        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+                        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.getDefault()).format(Date())
 
                         // 1. Export App Usage
                         val usageFile = File(exportDir, "app_usage_$timestamp.csv")
@@ -158,7 +158,7 @@ class ExportManager
                         labelsFile.writer(Charsets.UTF_8).use { writer ->
                             writer.append("id,timestamp,kind,value,refKey,promptedAt,contextJson\n")
                             labels.forEach {
-                                writer.append("${it.id},${it.timestamp},${escapeCsv(it.kind)},${escapeCsv(it.value)},")
+                                writer.append("${it.id},${it.timestamp},${escapeCsv(it.kind)},${escapeCsv(if (priv) "" else it.value)},")
                                 writer.append("${escapeCsv(if (priv) "" else it.refKey ?: "")},${it.promptedAt ?: ""},${escapeCsv(if (priv) "" else it.contextJson ?: "")}\n")
                             }
                         }
@@ -249,7 +249,7 @@ class ExportManager
                     } finally {
                         // Never leave uncompressed usage or context CSVs behind after a failed
                         // export. Keep only the completed ZIP returned to the caller.
-                        exportDir.listFiles()?.forEach { file ->
+                        exportDir.listFiles()?.filter { !it.name.endsWith(".zip", ignoreCase = true) }?.forEach { file ->
                             if (file != completedZip && !file.delete() && file.exists()) {
                                 Log.w(TAG, "Could not remove temporary export file: ${file.name}")
                             }
