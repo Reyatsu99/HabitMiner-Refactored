@@ -107,7 +107,7 @@
 
         <receiver
             android:name=".collection.DeviceEventReceiver"
-            android:exported="true">
+            android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.USER_PRESENT" />
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
