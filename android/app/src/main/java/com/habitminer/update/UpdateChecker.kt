@@ -130,8 +130,9 @@ class UpdateChecker
                     }
                 }
             } catch (e: Exception) {
-                // Offline or a bad answer: try again at the next scheduled check.
+                // Offline or a bad answer: back off so repeated screen opens don't hammer GitHub.
                 lastCheckFailed = true
+                backOff(now, null)
                 android.util.Log.i(TAG, "Update check failed: ${e.javaClass.simpleName}")
             } finally {
                 conn?.disconnect()
