@@ -100,7 +100,12 @@ fun PrivacyScreen(
         item(key = "optional") {
             SectionHeader("Only if you turn it on")
             RowGroup {
-                row { ListRow("Places", supporting = "A salted hash of the connected Wi-Fi network. Android location permission is needed to read it; no GPS coordinates are collected") }
+                row {
+                    ListRow(
+                        "Places",
+                        supporting = "A salted hash of the connected Wi-Fi network. Android location permission is needed to read it; no GPS coordinates are collected",
+                    )
+                }
                 row { ListRow("Health Connect", supporting = "Sleep sessions only, read-only, to check sleep estimates. Nothing is written back") }
                 row { ListRow("Calendar", supporting = "Busy or free only, never titles, places or people. Read when needed, not stored") }
             }
@@ -109,7 +114,12 @@ fun PrivacyScreen(
             SectionHeader("What it never does")
             RowGroup {
                 row { ListRow("Read messages or screens", supporting = "No notification text, no screen content, no keystrokes") }
-                row { ListRow("Track location", supporting = "No GPS coordinates or background location tracking. Optional Places reads only the connected Wi-Fi ID") }
+                row {
+                    ListRow(
+                        "Track location",
+                        supporting = "No GPS coordinates or background location tracking. Optional Places reads only the connected Wi-Fi ID",
+                    )
+                }
                 row { ListRow("Send data anywhere", supporting = "The only network use is checking GitHub for app updates") }
             }
         }
