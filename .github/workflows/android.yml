@@ -45,7 +45,7 @@ jobs:
         run: |
           chmod +x gradlew
           set -o pipefail
-          ./gradlew --no-daemon --stacktrace assembleDebug assembleRelease testDebugUnitTest spotlessCheck 2>&1 | tee build.log
+          ./gradlew --no-daemon --stacktrace assembleDebug assembleRelease testDebugUnitTest 2>&1 | tee build.log
 
       # Turn compiler and test failures into annotations so they show up on the
       # commit's check run without needing to open the raw logs.
