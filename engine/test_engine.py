@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 
 from baseline_model import PersonalBaseline
+from deviation_detector import compute_kl_divergence
 from deviation_detector import compute_kl_divergence, inject_controlled_deviation
 from evaluate import experiment3_deviation_detection, split_data_chronologically
 from feature_extraction import extract_time_bin_features
@@ -115,6 +116,13 @@ def test_markov_model():
     predictions = model.predict_next("SOCIAL", "WEEKDAY", "MORNING", top_k=1)
     assert predictions[0][0] == "PRODUCTIVITY"
 
+
+def test_kl_divergence_handles_empty_and_invalid_profiles():
+    assert compute_kl_divergence({}, {}) == 0.0
+    assert compute_kl_divergence({}, {"SOCIAL": 1.0}) == 0.0
+    assert compute_kl_divergence({"SOCIAL": 1.0}, {"SOCIAL": 1.0}) == pytest.approx(0.0)
+    with pytest.raises(ValueError, match="cannot contain negative values"):
+        compute_kl_divergence({"SOCIAL": -1.0}, {"SOCIAL": 1.0})
 
 def test_markov_fit_replaces_old_state_and_uses_stable_ties():
     model = TimeConditionedMarkovModel()
