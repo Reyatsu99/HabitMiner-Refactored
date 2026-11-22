@@ -38,9 +38,9 @@ class ExportManager
 
         private fun pkg(
             name: String?,
-            private: Boolean,
+            privacyMode: Boolean,
         ): String {
-            if (name.isNullOrEmpty() || !private) return name ?: ""
+            if (name.isNullOrEmpty() || !privacyMode) return name ?: ""
             val h = java.security.MessageDigest.getInstance("SHA-256").digest((salt() + name).toByteArray())
             return "app_" + h.take(5).joinToString("") { "%02x".format(it) }
         }
@@ -55,8 +55,8 @@ class ExportManager
         }
 
         /** Re-keys a stored Wi-Fi place token in privacy-safe exports without breaking its joins. */
-        private fun exportedPlaceId(value: String?, private: Boolean): String {
-            if (value.isNullOrEmpty() || !private) return value.orEmpty()
+        private fun exportedPlaceId(value: String?, privacyMode: Boolean): String {
+            if (value.isNullOrEmpty() || !privacyMode) return value.orEmpty()
             val hash = java.security.MessageDigest.getInstance("SHA-256").digest((salt() + "place" + value).toByteArray())
             return "place_" + hash.take(6).joinToString("") { "%02x".format(it) }
         }
