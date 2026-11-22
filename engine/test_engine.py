@@ -2,6 +2,7 @@ import pandas as pd
 import pytest
 
 from baseline_model import PersonalBaseline
+from deviation_detector import inject_controlled_deviation
 from evaluate import experiment3_deviation_detection, split_data_chronologically
 from feature_extraction import extract_time_bin_features
 from habit_discovery import mine_frequent_sequences
@@ -107,6 +108,26 @@ def test_markov_fit_replaces_old_state_and_uses_stable_ties():
 
     with pytest.raises(ValueError, match="top_k must be at least 1"):
         model.predict_next("SOCIAL", "WEEKDAY", "MORNING", top_k=0)
+
+
+def test_same_slot_anomaly_is_inserted_even_when_category_already_exists():
+    data = generate_synthetic_usage(num_users=1, num_days=7, seed=31)
+    existing = data.iloc[[0]].copy()
+    existing["app_category"] = "GAMING"
+    existing["time_slot"] = "EVENING"
+    data = pd.concat([data, existing], ignore_index=True)
+
+    days = data["start_time"].dt.date.nunique()
+    injected = inject_controlled_deviation(
+        data,
+        "user_1",
+        from_time_slot="EVENING",
+        to_time_slot="EVENING",
+        category="GAMING",
+    )
+
+    assert len(injected) == len(data) + days
+    assert injected["controlled_anomaly"].sum() == days
 
 
 def test_controlled_deviation_metrics_use_injected_day_bins():
