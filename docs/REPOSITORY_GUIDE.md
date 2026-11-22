@@ -77,6 +77,6 @@ The root `README.md` is the single project entry point. Do not add version-speci
 
 ## CI expectations
 
-The `Android build` workflow runs on pushes to `main` and pull requests targeting `main`. Its build/test job uses read-only contents permissions and runs debug/release APK builds, unit tests, Spotless checks, Room schema reporting, and artifact uploads. A separate publisher job with write permission runs only on pushes to `main` and publishes to `ci-out-main`. The `Python evaluation engine` workflow compiles and tests `engine/` on matching pushes and pull requests. Release publication is triggered by version tags matching `vMAJOR.MINOR.PATCH` and requires the configured signing secrets.
+The `Android build` workflow runs on pushes to `main` and pull requests targeting `main`. Its build/test job uses read-only contents permissions and runs debug/release APK builds, unit tests, Room schema reporting, and artifact uploads. A separate publisher job with write permission runs only on pushes to `main` and publishes to `ci-out-main`. The `Python evaluation engine` workflow compiles and tests `engine/` on matching pushes and pull requests. Release publication is triggered by version tags matching `vMAJOR.MINOR.PATCH` and requires the configured signing secrets.
 
 Do not treat a workflow run as passed until its conclusion is `success`. Do not force-update `main` to resolve divergence; use a reviewed merge or a fast-forward only when GitHub confirms that `main` is an ancestor of the intended target.
