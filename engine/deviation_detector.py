@@ -99,6 +99,7 @@ def detect_deviations(
                 today_profile = {k: v/total_dur for k, v in today_profile.items()}
         except (TypeError, ValueError):
             # Ignore malformed or empty JSON profile data; surface unrelated failures.
+            pass
             
         # KL-divergence
         if today_profile and b.category_profile:
