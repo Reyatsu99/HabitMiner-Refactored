@@ -48,8 +48,8 @@ class PersonalBaseline:
                     cat_dict = json.loads(cat_dict_str)
                     for cat, dur in cat_dict.items():
                         cat_totals[cat] = cat_totals.get(cat, 0) + dur
-                except Exception:
-                    pass
+                except (TypeError, ValueError):
+                    # Ignore malformed category profiles, not unrelated programming errors.
                     
             profile = {k: v / total_dur_all for k, v in cat_totals.items()} if total_dur_all > 0 else {}
             
