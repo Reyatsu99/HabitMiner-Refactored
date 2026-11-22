@@ -17,9 +17,10 @@ Scope: Android app, data collection and persistence, import/export, update deliv
 ### Data export and import
 - Moved export work to `Dispatchers.IO`, serialized concurrent exports and removed intermediate CSV files on success or failure.
 - Standardized CSV output to UTF-8 and corrected quoting for carriage returns as well as commas, quotes and newlines.
-- Re-keyed Wi-Fi place IDs consistently across context snapshots and the places table in privacy-safe exports.
+- Re-keyed Wi-Fi place IDs consistently across context snapshots and the places table in privacy-safe exports; redact free-text label values as well as place labels, insight text and app names.
 - Bounded ZIP imports to 32 entries, 32 MiB per entry and 128 MiB total uncompressed content. Limits apply to ignored entries too.
 - Removed mutable import-result state from the singleton importer, preventing one archive's privacy status from leaking into a later import.
+- Preserve earlier completed ZIPs when starting a new export, use collision-resistant millisecond timestamps, and delete incomplete ZIPs after failed writes.
 - Added regression coverage for entry-count limits and import-state isolation.
 
 ### Python evaluation engine
@@ -28,6 +29,7 @@ Scope: Android app, data collection and persistence, import/export, update deliv
 - Split holdouts by complete user-days to avoid sessions from the same day appearing in both train and test.
 - Marked controlled injected anomalies and calculate detection metrics once per user/day/time-bin rather than counting multiple event types as separate true positives.
 - Reset Markov model state on each fit, validate input keys and top-k values, and use deterministic tie-breaking.
+- Rebuild baselines from a clean state, validate EMA weights, and define KL divergence for empty profiles.
 - Added tests for reproducibility, invalid inputs, day-level splitting, unsupported adapters, refitting and anomaly-label metrics.
 
 ### CI and documentation
@@ -38,7 +40,7 @@ Scope: Android app, data collection and persistence, import/export, update deliv
 
 ## Existing design choices and remaining considerations
 
-1. **No GPS coordinate tracking is implemented.** Optional Wi-Fi place detection reads the connected access point's BSSID and stores a salted hash. Android requires the `ACCESS_FINE_LOCATION` permission to expose that identifier, so enabling Places still requires the system location permission. No latitude/longitude or GPS samples are collected. If the product requirement is *no location permission at all*, the Places feature and its permission declarations must be removed rather than described as GPS-free.
+1. **No GPS coordinate tracking is implemented.** Optional Wi-Fi Places reads the connected access point's BSSID and stores a salted hash with timestamps. Android requires the `ACCESS_FINE_LOCATION` permission to expose that identifier, so enabling Places still requires system location permission and can infer saved places. No latitude/longitude or GPS samples are collected. If the product requirement is *no location permission or place inference at all*, remove the Places feature and its permission declarations rather than describing it as GPS-free.
 2. **Automatic backup is disabled.** Users should use the app's manual export before uninstalling or changing devices.
 3. **Release updates require a published GitHub Release** with an APK asset and SHA-256 digest. The release workflow also requires the configured signing-key secrets; a different signing key will not update an already-installed build.
 4. **The Python engine is a prototype evaluated on synthetic data only.** StudentLife/UCI HAR ingestion and activity-recognition evaluation are not implemented. Synthetic experiment metrics must not be presented as validation on real users.
