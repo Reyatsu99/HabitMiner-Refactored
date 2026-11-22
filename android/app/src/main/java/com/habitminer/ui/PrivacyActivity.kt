@@ -117,7 +117,7 @@ fun PrivacyScreen(
                 row {
                     ListRow(
                         "Track location",
-                        supporting = "No GPS coordinates or background location tracking. Optional Places reads only the connected Wi-Fi ID",
+                        supporting = "No GPS coordinates or continuous location updates. If you enable Places, HabitMiner can infer a saved place from the connected Wi-Fi network; it stores a salted network hash and timestamps",
                     )
                 }
                 row { ListRow("Send data anywhere", supporting = "The only network use is checking GitHub for app updates") }
