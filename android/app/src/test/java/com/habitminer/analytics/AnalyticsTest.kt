@@ -1863,4 +1863,3 @@ class PatternsTest {
         assertTrue(est.lastAppLeisure)
     }
 }
-
