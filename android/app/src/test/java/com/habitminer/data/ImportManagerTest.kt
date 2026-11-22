@@ -8,6 +8,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Before
@@ -83,6 +85,25 @@ class ImportManagerTest {
             assertEquals(40f, snaps.getValue(5000).lightLux, 0.001f)
             assertNull(snaps.getValue(6000).proximityNear)
             assertEquals(true, snaps.getValue(6000).isCharging)
+        }
+
+    @Test
+    fun `privacy-safe result does not leak into the next import`() =
+        runBlocking {
+            val privateUsage =
+                usageCsv
+                    .replace("com.snapchat.android", "app_0123456789")
+                    .replace("com.example.app", "app_abcdef1234")
+                    .replace("Snapchat", "")
+                    .replace("Name, with comma", "")
+
+            val privateResult = importer.importZip(zip("app_usage_private.csv" to privateUsage))
+            assertTrue(privateResult.hiddenNames)
+            assertEquals(0, privateResult.usage)
+
+            val normalResult = importer.importZip(zip("app_usage_normal.csv" to usageCsv))
+            assertFalse(normalResult.hiddenNames)
+            assertEquals(2, normalResult.usage)
         }
 
     @Test
