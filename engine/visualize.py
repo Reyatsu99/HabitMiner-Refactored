@@ -1,3 +1,5 @@
+import html
+
 import pandas as pd
 
 def generate_evaluation_report(
@@ -139,7 +141,7 @@ def generate_evaluation_report(
                 <tbody>
 """
     for h in habits[:5]:
-        html += f"<tr><td>{h.habit_name}</td><td>{h.pattern_str}</td><td>{h.time_slot}</td><td>{h.confidence:.2f}</td><td>{h.support} days</td></tr>"
+        html += f"<tr><td>{html.escape(str(h.habit_name))}</td><td>{html.escape(str(h.pattern_str))}</td><td>{html.escape(str(h.time_slot))}</td><td>{h.confidence:.2f}</td><td>{h.support} days</td></tr>"
         
     html += """
                 </tbody>
