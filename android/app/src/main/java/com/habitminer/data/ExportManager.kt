@@ -24,7 +24,6 @@ class ExportManager
         private val contextRepository: com.habitminer.repository.ContextRepository,
         private val habitRepository: com.habitminer.repository.HabitRepository,
         private val feedbackRepository: com.habitminer.repository.FeedbackRepository,
-        private val usageDataCollector: com.habitminer.collection.UsageDataCollector,
         private val appIdentityResolver: com.habitminer.domain.AppIdentityResolver,
         private val insightRepository: com.habitminer.repository.InsightRepository,
         private val selfHealthDao: SelfHealthDao,
@@ -271,7 +270,7 @@ class ExportManager
 
         /** Up to 90 days of sleep per day, computed the same way as in the app. */
         private suspend fun sleepDays(usages: List<AppUsageEntity>): List<com.habitminer.analytics.DailySleep> =
-            runCatching {
+            try {
                 val now = System.currentTimeMillis()
                 val zone = java.time.ZoneId.systemDefault()
                 val since = now - 90L * 24 * 60 * 60 * 1000
@@ -285,7 +284,12 @@ class ExportManager
                 val today = java.time.LocalDate.now(zone)
                 val nights = com.habitminer.analytics.SleepDetector.detectRange(sessions, unlocks, samples, today, 90, now, zone)
                 com.habitminer.analytics.SleepDays.build(nights, com.habitminer.engine.LabelMappers.confirmedNaps(labels), today, 90, zone)
-            }.getOrDefault(emptyList())
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not calculate sleep rows for export", e)
+                emptyList()
+            }
 
         private fun readme(priv: Boolean): String =
             buildString {
