@@ -24,7 +24,9 @@ def compute_kl_divergence(p: dict, q: dict) -> float:
     """
     eps = 1e-5
     all_keys = set(p.keys()).union(q.keys())
-    
+    if not all_keys:
+        return 0.0
+
     p_arr = np.array([p.get(k, 0) + eps for k in all_keys])
     q_arr = np.array([q.get(k, 0) + eps for k in all_keys])
     
