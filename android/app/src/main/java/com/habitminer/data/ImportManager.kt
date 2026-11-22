@@ -2,6 +2,7 @@ package com.habitminer.data
 
 import android.content.Context
 import android.net.Uri
+import androidx.room.withTransaction
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -21,6 +22,7 @@ class ImportManager
     @Inject
     constructor(
         @ApplicationContext private val context: Context,
+        private val database: AppDatabase,
         private val appUsageDao: AppUsageDao,
         private val contextDao: ContextDao,
         private val labelDao: LabelDao,
@@ -58,6 +60,7 @@ class ImportManager
 
         suspend fun importZip(uri: Uri): Result =
             withContext(Dispatchers.IO) {
+                database.withTransaction {
                 var usage = 0
                 var snapshots = 0
                 var labels = 0
@@ -97,7 +100,8 @@ class ImportManager
                         zip.closeEntry()
                     }
                 }
-                Result(usage, snapshots, labels, places, files, hiddenNames)
+                    Result(usage, snapshots, labels, places, files, hiddenNames)
+                }
             }
 
         private suspend fun importUsage(rows: List<Map<String, String>>): UsageImportResult {
