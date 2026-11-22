@@ -31,7 +31,8 @@ Scope: Android app, data collection and persistence, import/export, update deliv
 - Marked controlled injected anomalies and calculate detection metrics once per user/day/time-bin rather than counting multiple event types as separate true positives.
 - Reset Markov model state on each fit, validate input keys and top-k values, and use deterministic tie-breaking.
 - Rebuild baselines from a clean state, validate EMA weights, and define KL divergence for empty profiles.
-- Added tests for reproducibility, invalid inputs, day-level splitting, unsupported adapters, refitting and anomaly-label metrics.
+- Added tests for reproducibility, invalid inputs, day-level splitting, unsupported adapters, refitting, anomaly-label metrics and escaped HTML report content.
+- Added a CI smoke test that generates an evaluation report and verifies the output file is non-empty.
 
 ### CI and documentation
 - Separated the read-only Android build/test job from the write-enabled main-only artifact publisher.
