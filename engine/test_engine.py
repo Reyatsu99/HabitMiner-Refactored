@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pandas as pd
 import pytest
 
@@ -8,6 +10,7 @@ from feature_extraction import extract_time_bin_features
 from habit_discovery import mine_frequent_sequences
 from markov_model import TimeConditionedMarkovModel
 from parser import generate_synthetic_usage, parse_studentlife, parse_uci_har
+from visualize import generate_evaluation_report
 
 
 @pytest.fixture
@@ -145,6 +148,27 @@ def test_same_slot_anomaly_is_inserted_even_when_category_already_exists():
     assert len(injected) == len(data) + days
     assert injected["controlled_anomaly"].sum() == days
 
+
+def test_report_escapes_habit_text(tmp_path):
+    output = tmp_path / "report.html"
+    habit = SimpleNamespace(
+        habit_name="<script>alert(1)</script>",
+        pattern_str="<img src=x onerror=alert(1)>",
+        time_slot="<b>EVENING</b>",
+        confidence=0.9,
+        support=5,
+    )
+    generate_evaluation_report(
+        results={"exp1": {}, "exp2": {}, "exp3": {}},
+        habits=[habit],
+        baseline_profile={},
+        sample_usage=pd.DataFrame(),
+        output_file=str(output),
+    )
+    report = output.read_text(encoding="utf-8")
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in report
+    assert "&lt;img src=x onerror=alert(1)&gt;" in report
+    assert "<script>alert(1)</script>" not in report
 
 def test_controlled_deviation_metrics_use_injected_day_bins():
     data = generate_synthetic_usage(num_users=1, num_days=28, seed=42)
