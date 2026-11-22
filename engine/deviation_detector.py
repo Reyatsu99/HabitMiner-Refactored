@@ -18,23 +18,26 @@ class DeviationEvent:
     date: str | None = None
 
 def compute_kl_divergence(p: dict, q: dict) -> float:
-    """
-    KL divergence between two category distributions.
-    Handles zero values with small epsilon.
-    """
-    eps = 1e-5
-    all_keys = set(p.keys()).union(q.keys())
-    if not all_keys:
+    """KL divergence for observed category profiles; empty profiles carry no evidence."""
+    if not p or not q:
         return 0.0
 
-    p_arr = np.array([p.get(k, 0) + eps for k in all_keys])
-    q_arr = np.array([q.get(k, 0) + eps for k in all_keys])
-    
-    p_arr = p_arr / p_arr.sum()
-    q_arr = q_arr / q_arr.sum()
-    
-    return float(np.sum(rel_entr(p_arr, q_arr)))
+    keys = sorted(set(p) | set(q))
+    p_arr = np.array([float(p.get(k, 0.0)) for k in keys], dtype=float)
+    q_arr = np.array([float(q.get(k, 0.0)) for k in keys], dtype=float)
+    if not np.isfinite(p_arr).all() or not np.isfinite(q_arr).all():
+        raise ValueError("category profiles must contain finite values")
+    if (p_arr < 0).any() or (q_arr < 0).any():
+        raise ValueError("category profiles cannot contain negative values")
+    if p_arr.sum() <= 0 or q_arr.sum() <= 0:
+        return 0.0
 
+    eps = 1e-5
+    p_arr += eps
+    q_arr += eps
+    p_arr /= p_arr.sum()
+    q_arr /= q_arr.sum()
+    return float(np.sum(rel_entr(p_arr, q_arr)))
 def normalized_score(z: float) -> float:
     """sigmoid(|z|) clamped to [0, 1]"""
     return min(1.0, 1.0 / (1.0 + math.exp(-abs(z))))
