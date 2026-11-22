@@ -1242,7 +1242,6 @@ class UpdateLogicTest {
         assertEquals("v2.2.0", UpdateLogic.newest(rs, 20100, null)?.tag)
         assertEquals("v2.1.0", UpdateLogic.newest(rs.take(2), 20000, "v2.2.0")?.tag)
         assertNull(UpdateLogic.newest(rs, 20200, null))
-        assertNull(UpdateLogic.newest(rs, 0, null)?.takeIf { false })
     }
 }
 
