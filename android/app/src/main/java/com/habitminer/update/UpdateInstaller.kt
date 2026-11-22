@@ -101,6 +101,8 @@ class UpdateInstaller
                     verifyPackage(file, release)?.let { return@withContext fail(it) }
                     _state.value = InstallState.Ready(file)
                 } catch (e: CancellationException) {
+                    file.delete()
+                    _state.value = InstallState.Idle
                     throw e
                 } catch (e: Exception) {
                     fail("The download couldn't finish. Check your connection and try again.")
