@@ -10,6 +10,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Before
@@ -32,7 +33,7 @@ class ImportManagerTest {
     @Before
     fun setUp() {
         db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).allowMainThreadQueries().build()
-        importer = ImportManager(context, db.appUsageDao(), db.contextDao(), db.labelDao(), db.placeDao(), db.deviceEventDao())
+        importer = ImportManager(context, db, db.appUsageDao(), db.contextDao(), db.labelDao(), db.placeDao(), db.deviceEventDao())
     }
 
     @After
@@ -114,6 +115,18 @@ class ImportManagerTest {
         assertThrows(IllegalArgumentException::class.java) {
             runBlocking { importer.importZip(uri) }
         }
+    }
+
+    @Test
+    fun `failed archive rolls back previously imported rows`() = runBlocking {
+        val entries = arrayOf("app_usage_1.csv" to usageCsv) +
+            Array(32) { index -> "ignored_$index.txt" to "" }
+        val uri = zip(*entries)
+
+        assertThrows(IllegalArgumentException::class.java) {
+            runBlocking { importer.importZip(uri) }
+        }
+        assertEquals(0, db.appUsageDao().getUsageCount().first())
     }
 
     @Test
