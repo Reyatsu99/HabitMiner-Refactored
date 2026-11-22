@@ -326,7 +326,7 @@ android/app/src/main/java/com/habitminer/
 └── widget/       home-screen widget
 ```
 
-More background on the original design is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/METHODOLOGY.md](docs/METHODOLOGY.md). See the [repository structure and branch guide](docs/REPOSITORY_GUIDE.md) for the code map and branch responsibilities.
+More background on the original design is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/METHODOLOGY.md](docs/METHODOLOGY.md). See the [repository structure and branch guide](docs/REPOSITORY_GUIDE.md) for the code map and branch responsibilities, and the [code review notes](docs/CODE_REVIEW.md) for recent fixes and remaining considerations.
 
 ---
 
