@@ -49,30 +49,30 @@ def generate_synthetic_usage(
             
             # Morning routine
             if rng.random() > 0.1:
-                start = current_date.replace(hour=rng.randint(7, 9), minute=random.randint(0, 59))
+                start = current_date.replace(hour=rng.randint(7, 9), minute=rng.randint(0, 59))
                 cat = "PRODUCTIVITY" if day_type == "WEEKDAY" else "ENTERTAINMENT"
-                dur = random.randint(300, 1800)
+                dur = rng.randint(300, 1800)
                 records.append((user_id, rng.choice(packages[cat]), cat, start, start + timedelta(seconds=dur), dur))
             
             # Afternoon usage
-            for _ in range(random.randint(2, 5)):
-                start = current_date.replace(hour=random.randint(12, 16), minute=random.randint(0, 59))
+            for _ in range(rng.randint(2, 5)):
+                start = current_date.replace(hour=rng.randint(12, 16), minute=rng.randint(0, 59))
                 cat = rng.choices(["COMMUNICATION", "SOCIAL", "PRODUCTIVITY"], weights=[0.4, 0.4, 0.2])[0]
-                dur = random.randint(60, 900)
-                records.append((user_id, random.choice(packages[cat]), cat, start, start + timedelta(seconds=dur), dur))
+                dur = rng.randint(60, 900)
+                records.append((user_id, rng.choice(packages[cat]), cat, start, start + timedelta(seconds=dur), dur))
 
             # Evening routine
-            start = current_date.replace(hour=random.randint(18, 21), minute=random.randint(0, 59))
-            cat = "ENTERTAINMENT" if random.random() > 0.3 else "SOCIAL"
-            dur = random.randint(1200, 3600)
-            records.append((user_id, random.choice(packages[cat]), cat, start, start + timedelta(seconds=dur), dur))
+            start = current_date.replace(hour=rng.randint(18, 21), minute=rng.randint(0, 59))
+            cat = "ENTERTAINMENT" if rng.random() > 0.3 else "SOCIAL"
+            dur = rng.randint(1200, 3600)
+            records.append((user_id, rng.choice(packages[cat]), cat, start, start + timedelta(seconds=dur), dur))
             
             # Late night anomaly occasionally
-            if random.random() < 0.1:
-                start = current_date.replace(hour=random.randint(23, 23), minute=random.randint(0, 59))
+            if rng.random() < 0.1:
+                start = current_date.replace(hour=rng.randint(23, 23), minute=rng.randint(0, 59))
                 cat = "GAMING"
-                dur = random.randint(3600, 7200)
-                records.append((user_id, random.choice(packages[cat]), cat, start, start + timedelta(seconds=dur), dur))
+                dur = rng.randint(3600, 7200)
+                records.append((user_id, rng.choice(packages[cat]), cat, start, start + timedelta(seconds=dur), dur))
 
     df = pd.DataFrame(records, columns=["user_id", "package_name", "app_category", "start_time", "end_time", "duration_seconds"])
     df["time_slot"] = df["start_time"].dt.hour.apply(get_time_slot)
