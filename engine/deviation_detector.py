@@ -181,9 +181,8 @@ def inject_controlled_deviation(
         & (df["app_category"] == category)
         & (df["time_slot"] == from_time_slot)
     )
-    if mask.any():
-        if from_time_slot != to_time_slot:
-            df.loc[mask, "start_time"] += pd.Timedelta(hours=5)
+    if mask.any() and from_time_slot != to_time_slot:
+        df.loc[mask, "start_time"] += pd.Timedelta(hours=5)
             df.loc[mask, "end_time"] += pd.Timedelta(hours=5)
         df.loc[mask, "time_slot"] = to_time_slot
         df.loc[mask, "day_type"] = df.loc[mask, "start_time"].dt.weekday.apply(
