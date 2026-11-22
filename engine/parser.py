@@ -76,7 +76,7 @@ def generate_synthetic_usage(
 
     df = pd.DataFrame(records, columns=["user_id", "package_name", "app_category", "start_time", "end_time", "duration_seconds"])
     df["time_slot"] = df["start_time"].dt.hour.apply(get_time_slot)
-    df["day_type"] = df["start_time"].dt.weekday.apply(lambda w: "WEEKEND" if w >= 5 else "WEEKDAY")
+    df["day_type"] = df["start_time"].dt.day_of_week.apply(lambda w: "WEEKEND" if w >= 5 else "WEEKDAY")
     df = df.sort_values(by=["user_id", "start_time"]).reset_index(drop=True)
     return df
 
