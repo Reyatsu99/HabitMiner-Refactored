@@ -360,7 +360,7 @@ Requires JDK 21 and a physical Android 8.0+ device; emulators don't produce real
 - **Notification access**: notification counts per app, never their text.
 - **Physical activity**: steps and activity recognition, to tell walking from sitting.
 - **Battery optimisation off**: so Android doesn't stop collection in the background.
-- **Optional**: Health Connect (sleep), calendar (busy times), location (only to see the Wi-Fi network for places; no location is recorded).
+- **Optional**: Health Connect (sleep), calendar (busy times), and Wi-Fi Places. Places requires Android location permission to read the connected network ID and stores a salted hash with timestamps; it does not collect GPS coordinates.
 
 ---
 
