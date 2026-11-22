@@ -68,6 +68,7 @@ Tests are under `android/app/src/test/java/com/habitminer/`. Build configuration
 
 - `docs/ARCHITECTURE.md`, `docs/METHODOLOGY.md`, `docs/FINDINGS.md`, and `docs/BUGS.md`: current design and analysis documentation.
 - `docs/SEQUENTIAL_HABIT_MINING.md`: algorithm behavior, safeguards, and limitations.
+- `docs/CODE_REVIEW.md`: recent code-review fixes, validation coverage, and remaining privacy/release considerations.
 - `docs/archive/`: historical version-specific README files.
 - `docs/reports/`: generated or standalone project reports.
 - `docs/reference/`: supporting reference material that is not application source.
