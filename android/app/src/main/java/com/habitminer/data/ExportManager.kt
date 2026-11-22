@@ -66,6 +66,7 @@ class ExportManager
                     val exportDir = File(context.getExternalFilesDir(null) ?: context.filesDir, "export")
                     val priv = prefs.getBoolean(PrefsKeys.EXPORT_PRIVATE, false)
                     var completedZip: File? = null
+                    var inProgressZip: File? = null
                     try {
                         if (!exportDir.exists() && !exportDir.mkdirs()) error("Could not create the export directory")
                         // A previous export is no longer needed in this staging directory.
@@ -230,6 +231,7 @@ class ExportManager
 
                         // 13. Zip everything
                         val zipFile = File(exportDir, "habitminer_export_$timestamp.zip")
+                        inProgressZip = zipFile
                         java.util.zip.ZipOutputStream(java.io.FileOutputStream(zipFile)).use { zos ->
                             listOf(usageFile, contextFile, habitsFile, baselinesFile, deviationsFile, labelsFile, placesFile, eventsFile, sleepFile, insightFile, selfFile, readmeFile, schemaFile).forEach { file ->
                                 if (file.exists()) {
@@ -247,6 +249,7 @@ class ExportManager
                         Log.e(TAG, "exportDataToCsv failed", e)
                         null
                     } finally {
+                        if (completedZip == null) inProgressZip?.delete()
                         // Never leave uncompressed usage or context CSVs behind after a failed
                         // export. Keep only the completed ZIP returned to the caller.
                         exportDir.listFiles()?.filter { !it.name.endsWith(".zip", ignoreCase = true) }?.forEach { file ->
