@@ -4,6 +4,7 @@ import android.content.Context
 import com.habitminer.domain.AppIdentityResolver
 import com.habitminer.repository.ContextRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -72,6 +73,8 @@ class UsageIngestor
                             repairStoredLocked()
                             // Mark the migration complete only after every repair write succeeds.
                             prefs.edit().putInt(KEY_REPAIRED, REPAIR_VERSION).apply()
+                        } catch (e: CancellationException) {
+                            throw e
                         } catch (e: Exception) {
                             // A transient database failure must not permanently skip the repair.
                             android.util.Log.w("HabitMiner", "Session repair failed; it will be retried", e)
