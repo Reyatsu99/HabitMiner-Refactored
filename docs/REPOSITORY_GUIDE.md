@@ -22,6 +22,7 @@ All five source branches currently point to the same commit. `main` is the only 
 
 These branches are workflow outputs, not application source branches:
 
+- `ci-out-main` — current output branch, published only after a successful main-branch build
 - `ci-out-HM-Extended`
 - `ci-out-feat-context-aware-habit-mining`
 - `ci-out-harsh-habitminer-extended`
