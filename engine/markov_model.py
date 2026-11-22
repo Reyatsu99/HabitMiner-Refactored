@@ -77,7 +77,7 @@ class TimeConditionedMarkovModel:
             
         probs = self.transitions[time_bin][current_state]
         preds = [(k, v) for k, v in probs.items()]
-        return sorted(preds, key=lambda x: x[1], reverse=True)[:top_k]
+        return sorted(preds, key=lambda x: (-x[1], x[0]))[:top_k]
 
     def evaluate_predictions(self, test_sequences: Dict[str, List[List[str]]], top_k: int = 3) -> dict:
         if top_k < 1:
