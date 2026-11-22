@@ -44,3 +44,7 @@ jobs:
 
       - name: Run tests
         run: python -m pytest -q
+      - name: Smoke-test evaluation report
+        run: python main.py --dataset synthetic --mode evaluate --num-days 28 --num-users 3 --seed 42 --output /tmp/habitminer-report.html
+      - name: Verify report was generated
+        run: test -s /tmp/habitminer-report.html
