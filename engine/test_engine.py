@@ -184,3 +184,5 @@ def test_controlled_deviation_metrics_use_injected_day_bins():
     assert 0.0 <= result["f1"] <= 1.0
     assert 0.0 <= result["false_positive_rate"] <= 1.0
     assert result["true_positives"] + result["false_negatives"] == result["injected_bins"]
+    assert result["true_positives"] > 0
+    assert result["recall"] > 0.0
