@@ -61,6 +61,11 @@ class UpdateChecker
             prefs.edit()
                 .remove(PrefsKeys.UPDATE_ETAG)
                 .remove(PrefsKeys.UPDATE_CACHED)
+                .remove(PrefsKeys.UPDATE_LAST_CHECK)
+                .remove(PrefsKeys.UPDATE_NOT_BEFORE)
+                .remove(PrefsKeys.UPDATE_FAILURES)
+                .remove(PrefsKeys.UPDATE_SKIPPED)
+                .remove(PrefsKeys.UPDATE_NOTIFIED)
                 .putString(PrefsKeys.UPDATE_REPO, UpdateConfig.REPO)
                 .apply()
         }
