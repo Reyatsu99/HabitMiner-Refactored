@@ -104,7 +104,8 @@ class ImportManager
             // A privacy-safe export replaces packages with codes like app_3f9a1c02de; restoring
             // those would fill the history with apps that don't exist.
             val coded = Regex("^app_[0-9a-f]{10}$")
-            if (rows.isNotEmpty() && rows.all { coded.matches(it["packageName"].orEmpty()) }) {
+            val packageNames = rows.map { it["packageName"].orEmpty() }.filter { it.isNotBlank() }
+            if (packageNames.isNotEmpty() && packageNames.all(coded::matches)) {
                 return UsageImportResult(0, hiddenNames = true)
             }
             val parsed =

@@ -269,7 +269,7 @@ fun SettingsScreen(
                 icon = Icons.Rounded.Storage,
                 iconColor = com.habitminer.ui.theme.LocalDataColors.current.goodHue.start,
                 info =
-                    "Everything HabitMiner records stays on this phone. Nothing is sent to a server.\n\n" +
+                    "Usage and sensor records stay on this phone. HabitMiner contacts GitHub only to check for app updates; it never uploads those records.\n\n" +
                         "Export makes a ZIP of CSV files you can open in a spreadsheet or analyse in Python. Import merges an export back in " +
                         "without duplicates, including exports from the original HabitMiner app.",
             )
@@ -304,7 +304,7 @@ fun SettingsScreen(
                         icon = Icons.Rounded.VisibilityOff,
                         iconColor = com.habitminer.ui.theme.LocalDataColors.current.sleepHue.start,
                         title = "Hide app names in exports",
-                        description = "Apps become short codes, and place names and text are left out. Good for sharing with others.",
+                        description = "Apps become short codes; place names and free-text notes are removed. Exact times, durations, sensor readings and sleep patterns remain, so this is pseudonymized—not anonymous—data.",
                         checked = priv,
                         onChange = {
                             priv = it

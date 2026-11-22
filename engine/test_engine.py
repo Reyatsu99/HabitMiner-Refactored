@@ -4,7 +4,6 @@ import pandas as pd
 import pytest
 
 from baseline_model import PersonalBaseline
-from deviation_detector import compute_kl_divergence
 from deviation_detector import compute_kl_divergence, inject_controlled_deviation
 from evaluate import experiment3_deviation_detection, split_data_chronologically
 from feature_extraction import extract_time_bin_features
@@ -100,10 +99,6 @@ def test_baseline_build_replaces_stale_bins_and_validates_alpha(synthetic_data):
         baseline.update(features, alpha=1.5)
 
 
-def test_kl_divergence_handles_empty_profiles():
-    assert compute_kl_divergence({}, {}) == 0.0
-    assert compute_kl_divergence({"SOCIAL": 1.0}, {"SOCIAL": 1.0}) < 1e-9
-
 def test_markov_model():
     seqs = {
         "u1|WEEKDAY|MORNING": [
@@ -123,6 +118,8 @@ def test_kl_divergence_handles_empty_and_invalid_profiles():
     assert compute_kl_divergence({"SOCIAL": 1.0}, {"SOCIAL": 1.0}) == pytest.approx(0.0)
     with pytest.raises(ValueError, match="cannot contain negative values"):
         compute_kl_divergence({"SOCIAL": -1.0}, {"SOCIAL": 1.0})
+    with pytest.raises(ValueError, match="finite values"):
+        compute_kl_divergence({"SOCIAL": float("nan")}, {"SOCIAL": 1.0})
 
 def test_markov_fit_replaces_old_state_and_uses_stable_ties():
     model = TimeConditionedMarkovModel()

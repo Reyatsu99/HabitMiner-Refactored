@@ -18,7 +18,8 @@ Scope: Android app, data collection and persistence, import/export, update deliv
 ### Data export and import
 - Moved export work to `Dispatchers.IO`, serialized concurrent exports and removed intermediate CSV files on success or failure.
 - Standardized CSV output to UTF-8 and corrected quoting for carriage returns as well as commas, quotes and newlines.
-- Re-keyed Wi-Fi place IDs consistently across context snapshots and the places table in privacy-safe exports; redact free-text label values as well as place labels, insight text and app names.
+- Re-keyed Wi-Fi place IDs consistently across context snapshots and the places table in pseudonymized exports; redact free-text label values as well as place labels, insight text and app names.
+- Clarified that pseudonymized exports still retain exact timestamps, durations, sensor readings, sleep summaries and behavior sequences; they are not anonymous and should still be treated as personal data.
 - Bounded ZIP imports to 32 entries, 32 MiB per entry and 128 MiB total uncompressed content. Limits apply to ignored entries too.
 - Removed mutable import-result state from the singleton importer, preventing one archive's privacy status from leaking into a later import.
 - Preserve earlier completed ZIPs when starting a new export, use collision-resistant millisecond timestamps, and delete incomplete ZIPs after failed writes.

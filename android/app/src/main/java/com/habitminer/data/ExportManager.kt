@@ -312,9 +312,9 @@ class ExportManager
                 appendLine("Notification rows hold the app and when it arrived, never its text.")
                 if (priv) {
                     appendLine()
-                    appendLine("Privacy-safe export: package names are replaced by app_<hash> (salted, stable on this phone), and app names,")
+                    appendLine("Pseudonymized export (not anonymous): package names are replaced by app_<hash> (salted, stable on this phone), and app names,")
                     appendLine("session IDs are re-keyed, place IDs are re-keyed consistently across files, and place names, routine descriptions, insight text and keys, and typed check-in notes are left out.")
-                    appendLine("App categories are kept.")
+                    appendLine("App categories are kept. Exact timestamps, durations, sensor readings, sleep summaries and behavior sequences remain; treat this as personal data.")
                 }
             }
 

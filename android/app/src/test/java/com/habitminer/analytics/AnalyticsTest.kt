@@ -1219,7 +1219,9 @@ class UpdateLogicTest {
     fun `only this repository's GitHub downloads over https are trusted`() {
         assertTrue(UpdateLogic.trustedDownload("https://github.com/a/b/releases/download/v1.0.0/x.apk", "a/b"))
         assertTrue(UpdateLogic.trustedDownload("https://github.com/Reyatsu99/HabitMiner-Refactored/releases/download/v2.6.0/app.apk", "Reyatsu99/HabitMiner-Refactored"))
-        assertTrue(UpdateLogic.trustedDownload("https://objects.githubusercontent.com/abc", "a/b"))
+        assertTrue(UpdateLogic.trustedDownload("https://objects.githubusercontent.com/github-production-release-asset/123/asset.apk", "a/b"))
+        assertTrue(UpdateLogic.trustedDownload("https://release-assets.githubusercontent.com/github-production-release-asset/123/asset.apk", "a/b"))
+        assertFalse(UpdateLogic.trustedDownload("https://objects.githubusercontent.com/abc", "a/b"))
         assertFalse(UpdateLogic.trustedDownload("http://github.com/a/b/releases/download/v1.0.0/x.apk", "a/b"))
         assertFalse(UpdateLogic.trustedDownload("https://github.com/evil/b/releases/download/v1.0.0/x.apk", "a/b"))
         assertFalse(UpdateLogic.trustedDownload("https://github.com.evil.com/a/b/releases/download/v1/x.apk", "a/b"))

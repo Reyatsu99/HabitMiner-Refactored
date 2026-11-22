@@ -82,8 +82,9 @@ fun PrivacyScreen(
         }
         item(key = "summary") {
             Note(
-                "Everything HabitMiner records stays on this phone. There's no account, no server and no analytics. " +
-                    "Data leaves the phone only when you export it yourself.",
+                "Your usage history and sensor readings stay on this phone. There's no account or third-party analytics. " +
+                    "HabitMiner contacts GitHub only to check for app updates; it never uploads your usage records. " +
+                    "Data leaves the phone only when you export or share it.",
             )
         }
         item(key = "records") {
@@ -120,7 +121,7 @@ fun PrivacyScreen(
                         supporting = "No GPS coordinates or continuous location updates. If you enable Places, HabitMiner can infer a saved place from the connected Wi-Fi network; it stores a salted network hash and timestamps",
                     )
                 }
-                row { ListRow("Send data anywhere", supporting = "The only network use is checking GitHub for app updates") }
+                row { ListRow("Upload usage data", supporting = "No usage or sensor records are uploaded. The only network request checks GitHub for app updates") }
             }
         }
         item(key = "control") {
