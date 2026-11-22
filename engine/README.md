@@ -10,7 +10,7 @@ It is a small statistical evaluation prototype for frequency-based sequential pa
 4. **Baseline**: Build a personal behavioral baseline using mean/std and category distribution.
 5. **Deviation Detection**: Z-score and KL-divergence to find behavioral anomalies.
 6. **Evaluate**: Run three prototype experiments on synthetic data.
-7. **Report**: Generate self-contained HTML reports with Chart.js.
+7. **Report**: Generate HTML reports with embedded experiment data; Chart.js is loaded from a CDN for interactive charts.
 
 ## Experiments
 - **Experiment 1 (Habit Discovery)**: Evaluates confidence and support of mined habits.
