@@ -32,13 +32,14 @@ jobs:
         id: v
         run: |
           TAG="${GITHUB_REF_NAME}"
-          if [[ ! "$TAG" =~ ^v([0-9]{1,2})\.([0-9]{1,2})\.([0-9]{1,2})$ ]]; then
+          if [[ "$TAG" =~ ^v([0-9]{1,2})\.([0-9]{1,2})\.([0-9]{1,2})$ ]]; then
+            MAJ="${BASH_REMATCH[1]}"
+            MIN="${BASH_REMATCH[2]}"
+            PAT="${BASH_REMATCH[3]}"
+          else
             echo "::error::Release tags must use vMAJOR.MINOR.PATCH with 1-2 digits per part (for example v2.6.0)."
             exit 1
           fi
-          MAJ="${BASH_REMATCH[1]}"
-          MIN="${BASH_REMATCH[2]}"
-          PAT="${BASH_REMATCH[3]}"
           CODE=$((10#$MAJ * 10000 + 10#$MIN * 100 + 10#$PAT))
           echo "code=$CODE" >> "$GITHUB_OUTPUT"
           echo "name=${TAG#v}" >> "$GITHUB_OUTPUT"
