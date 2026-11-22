@@ -13,6 +13,7 @@ Scope: Android app, data collection and persistence, import/export, update deliv
 - Corrected the AccessibilityService export flag. Android can bind the service, while `BIND_ACCESSIBILITY_SERVICE` remains required and window-content retrieval stays disabled.
 - Made the system-only boot/unlock receiver non-exported to reduce the app's external broadcast attack surface.
 - Changed the one-time session-repair marker to be written only after the repair succeeds, so transient database errors can be retried.
+- Propagate coroutine cancellation through monitoring, export and update-download paths instead of treating cancellation as an ordinary recoverable error.
 
 ### Data export and import
 - Moved export work to `Dispatchers.IO`, serialized concurrent exports and removed intermediate CSV files on success or failure.
