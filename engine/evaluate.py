@@ -108,7 +108,7 @@ def experiment3_deviation_detection(usage_df: pd.DataFrame, user_id: str = None)
         usage_df = usage_df[usage_df["user_id"] == user_id]
 
     train_df, test_df = split_data_chronologically(usage_df)
-    target_user = user_id or "user_1"
+    target_user = user_id or (str(usage_df["user_id"].iloc[0]) if not usage_df.empty else "user_1")
     train_features = extract_time_bin_features(train_df, user_id=target_user)
     baseline = build_baselines_for_all_users(train_features).get(target_user)
     if baseline is None:
