@@ -183,7 +183,7 @@ def inject_controlled_deviation(
     )
     if mask.any() and from_time_slot != to_time_slot:
         df.loc[mask, "start_time"] += pd.Timedelta(hours=5)
-            df.loc[mask, "end_time"] += pd.Timedelta(hours=5)
+        df.loc[mask, "end_time"] += pd.Timedelta(hours=5)
         df.loc[mask, "time_slot"] = to_time_slot
         df.loc[mask, "day_type"] = df.loc[mask, "start_time"].dt.weekday.apply(
             lambda weekday: "WEEKEND" if weekday >= 5 else "WEEKDAY"
