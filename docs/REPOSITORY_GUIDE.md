@@ -4,7 +4,7 @@
 
 `main` is the canonical integration branch and the repository's default branch. It contains the integrated HabitMiner Extended source and should remain buildable. Changes should normally enter through a pull request or a reviewed commit, then be validated by the Android workflow.
 
-At the time of this guide, `main` and `harsh-habitminer-extended` are synchronized after the sequential habit-mining integration.
+`main` is the canonical branch. The Extended 2.6 integration, context-aware insights, and sequential habit-mining changes are all part of the current application source.
 
 ## Source branches
 
@@ -28,17 +28,17 @@ These branches are workflow outputs, not application source branches:
 - `ci-outputs`
 - `ci-screenshots`
 
-The Android workflow creates a branch named `ci-out-<source-branch>` for non-pull-request builds. The older `ci-outputs` and `ci-screenshots` branches are retained legacy output snapshots. Never merge any `ci-*` branch into application source.
+The Android workflow uses a read-only build/test job and a separate `main`-only publisher job. The publisher creates or updates `ci-out-main` from the APK/screenshot artifact. The older `ci-outputs` and `ci-screenshots` branches are retained legacy output snapshots. Never merge any `ci-*` branch into application source.
 
 ## Top-level layout
 
 | Path | Purpose |
 |---|---|
 | `android/` | Native Android application, Gradle wrapper, build configuration, and Kotlin tests |
-| `engine/` | Offline Python evaluation engine for sequential habit mining, time-conditioned Markov prediction, deviation detection, and experiment reports; see `engine/README.md` |
+| `engine/` | Offline Python evaluation prototype for deterministic synthetic data, sequential patterns, time-conditioned Markov prediction, deviation heuristics and reports; see `engine/README.md` |
 | `data/` | Small demo fixtures and dataset instructions; raw and personal datasets are excluded by `.gitignore` |
 | `docs/` | Architecture, methodology, findings, project reports, screenshots, archived READMEs, and reference material |
-| `.github/workflows/` | Android build/test and signed release automation |
+| `.github/workflows/` | Android build/test/publish, Python engine tests, and signed release automation |
 
 Keep generated reports and historical documentation under `docs/`, not in the repository root. Keep raw user datasets out of Git; use the documented local data paths and the existing ignore rules.
 ## Application source map
@@ -76,6 +76,6 @@ The root `README.md` is the single project entry point. Do not add version-speci
 
 ## CI expectations
 
-The `Android build` workflow runs on pushes to `main` and pull requests targeting `main`. It runs debug/release APK builds, unit tests, Room schema reporting, and APK artifact upload. Pull requests upload Actions artifacts but do not push generated-output branches; main builds publish to `ci-out-main`. Release publication is triggered by version tags matching `vMAJOR.MINOR.PATCH` and requires the configured signing secrets.
+The `Android build` workflow runs on pushes to `main` and pull requests targeting `main`. Its build/test job uses read-only contents permissions and runs debug/release APK builds, unit tests, Spotless checks, Room schema reporting, and artifact uploads. A separate publisher job with write permission runs only on pushes to `main` and publishes to `ci-out-main`. The `Python evaluation engine` workflow compiles and tests `engine/` on matching pushes and pull requests. Release publication is triggered by version tags matching `vMAJOR.MINOR.PATCH` and requires the configured signing secrets.
 
 Do not treat a workflow run as passed until its conclusion is `success`. Do not force-update `main` to resolve divergence; use a reviewed merge or a fast-forward only when GitHub confirms that `main` is an ancestor of the intended target.
