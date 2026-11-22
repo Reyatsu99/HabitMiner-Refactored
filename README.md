@@ -206,7 +206,7 @@ Today opens with stories, like Instagram's: **Today** (one or two insights), **L
   </tr>
 </table>
 
-<sub>Rendered by the app's screenshot tests (Robolectric) with two weeks of sample data, so the numbers are illustrative. Pushes to Android source branches regenerate these screenshots. Non-PR builds publish them to the matching <code>ci-out-&lt;branch-name&gt;</code> branch; pull-request builds upload Actions artifacts only. Locally: <code>./gradlew testDebugUnitTest --tests "*ScreenshotTest*"</code>, images in <code>android/app/build/screenshots</code>.</sub>
+<sub>Rendered by the app's screenshot tests (Robolectric) with two weeks of sample data, so the numbers are illustrative. Builds on `main` regenerate and publish these screenshots to `ci-out-main`; pull-request builds upload Actions artifacts only. Locally: <code>./gradlew testDebugUnitTest --tests "*ScreenshotTest*"</code>, images in <code>android/app/build/screenshots</code>.</sub>
 
 ---
 
@@ -334,7 +334,7 @@ More background on the original design is in [docs/ARCHITECTURE.md](docs/ARCHITE
 
 The separate Python prototype under `engine/` evaluates sequential-pattern mining, time-conditioned Markov prediction and deviation heuristics on **reproducible synthetic usage data**. Its current CLI supports `--dataset synthetic` with a configurable `--seed`; StudentLife and UCI HAR adapters/activity-recognition evaluation are explicitly marked as not implemented rather than silently substituting synthetic data. See [engine/README.md](engine/README.md).
 
-CI runs Android build/unit/screenshot and formatting checks separately from the Python evaluation-engine tests. Pull-request build/test jobs are read-only; only a successful push to `main` publishes APK/screenshot outputs to `ci-out-main`.
+CI runs Android build/unit/screenshot checks separately from the Python evaluation-engine tests. Pull-request build/test jobs are read-only; only a successful push to `main` publishes APK/screenshot outputs to `ci-out-main`.
 
 ## 🚀 Getting started
 
