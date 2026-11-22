@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from typing import Dict, List, Tuple
+from typing import Dict, List
 import json
 
 def extract_time_bin_features(usage_df: pd.DataFrame, user_id: str = None) -> pd.DataFrame:
