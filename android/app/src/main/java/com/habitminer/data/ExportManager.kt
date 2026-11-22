@@ -3,6 +3,7 @@ package com.habitminer.data
 import android.content.Context
 import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.sync.Mutex
@@ -245,6 +246,8 @@ class ExportManager
 
                         completedZip = zipFile
                         zipFile.absolutePath
+                    } catch (e: CancellationException) {
+                        throw e
                     } catch (e: Exception) {
                         Log.e(TAG, "exportDataToCsv failed", e)
                         null
